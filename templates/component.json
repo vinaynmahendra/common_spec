@@ -1,0 +1,483 @@
+{
+  "checks": [
+    {
+      "goodAnswer": "A named APG pattern with a keyboard table, focus-management rules for every action, live-region rules, and a dated manual test record across at least NVDA, JAWS, VoiceOver (macOS and iOS) and TalkBack. Automated axe checks run on every story and the remaining criteria are covered by a written manual checklist.",
+      "id": "accessibility",
+      "label": "Assistive technology conformance",
+      "probes": [
+        "Which APG pattern does it follow, and where does it deliberately deviate (with reasons)? Is a native HTML element used wherever one exists instead of ARIA?",
+        "How is the accessible name computed in each usage (visible label, `aria-labelledby`), and does it contain the visible label text so voice-control users can say it (2.5.3)?",
+        "Where does focus go after open, close, delete, error and async completion, and is it ever lost to `<body>` or hidden behind sticky headers or footers (2.4.11)?",
+        "Which changes are announced through live regions, how often, and are announcements throttled so they do not flood a screen reader?",
+        "Does any content appear on hover or focus (tooltips, previews), and can it be dismissed, hovered and kept visible (1.4.13)?",
+        "Which screen reader and browser pairs are tested manually, how often, and where are the results recorded?",
+        "Does the component work in Windows forced-colours mode with visible focus and selection?"
+      ],
+      "question": "Does the component expose the correct name, role, value and state to assistive technologies and follow the matching APG pattern, so that it works with keyboard, screen readers, voice control and magnification on the browsers our users actually use?",
+      "redFlags": [
+        "`div` or `span` with click handlers instead of buttons or links.",
+        "Focus not managed after async actions or removal.",
+        "Only automated axe checks, no manual screen reader testing.",
+        "Icon-only controls with no accessible name."
+      ],
+      "refs": [
+        {
+          "title": "W3C WAI: ARIA Authoring Practices Guide",
+          "url": "https://www.w3.org/WAI/ARIA/apg/"
+        },
+        {
+          "title": "W3C WAI: Understanding 4.1.2 Name, Role, Value",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/name-role-value"
+        },
+        {
+          "title": "W3C: Accessible Name and Description Computation 1.2",
+          "url": "https://www.w3.org/TR/accname-1.2/"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A typed props contract with discriminated unions for exclusive modes, accessibility-critical props marked required, documented escape hatches, and a written definition of breaking change tied to semver with a deprecation period and codemod where practical.",
+      "id": "api-design",
+      "label": "API design and misuse resistance",
+      "probes": [
+        "Are mutually exclusive props expressed as TypeScript discriminated unions (for example `files` plus `onFilesChange` versus `defaultFiles`) so misuse fails at compile time?",
+        "Does it support both controlled and uncontrolled use where it holds state, and does it warn when switched between them?",
+        "Are naming and event conventions the same as sibling components (`onXChange`, `disabled`, `size`, `variant`), and is that checked by review or lint?",
+        "What escape hatches exist (`className`, `asChild`, slots, ref forwarding, passthrough `data-*` and `aria-*`), and which are deliberately not offered to prevent visual drift?",
+        "Which props are required for accessibility (such as `label`) and therefore cannot be omitted?",
+        "What counts as a breaking change for this component (prop rename, default change, DOM structure change that breaks tests or styling), and what is the deprecation path?",
+        "Does it work as a server component, or which parts require `'use client'`, and is that boundary documented?"
+      ],
+      "question": "Is the props API small, typed so that invalid combinations do not compile, consistent with the rest of the library, and stable enough that consuming apps will not break on upgrade?",
+      "redFlags": [
+        "Boolean prop explosion (`isCompact`, `isSmall`, `isDense`) instead of a single variant.",
+        "Optional `label` with no enforced alternative.",
+        "Arbitrary `style` or `className` reaching internal parts.",
+        "Breaking changes shipped in minor versions."
+      ],
+      "refs": [
+        {
+          "title": "React docs: <input> (controlled and uncontrolled)",
+          "url": "https://react.dev/reference/react-dom/components/input"
+        },
+        {
+          "title": "Semantic Versioning 2.0.0",
+          "url": "https://semver.org/"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A complete token table per part and state, lint showing zero raw values, Storybook stories for every active tenant theme × mode in visual regression, and confirmation that each state pair is covered by the design system contrast check.",
+      "id": "theming",
+      "label": "Tenant themes and modes",
+      "probes": [
+        "Does the component reference only semantic or its own component tokens, with no primitives or raw values (checked by lint)?",
+        "Which tokens does each state use, and are all its state pairs (text on background, border on surface, focus ring on every surface) in the contrast manifest?",
+        "How does it render under each active tenant theme (for example an HKIAC theme and a SEBI ODR institution theme) with long tenant terminology and their logo sizes?",
+        "Does it behave correctly in dark mode, high-contrast mode, `forced-colors: active` and reduced motion?",
+        "Is any part tenant-configurable beyond tokens and terminology? If so, why, and where is that configuration validated?"
+      ],
+      "question": "Does the component look correct and stay accessible under every active tenant theme, colour mode, density and forced-colours setting, using only semantic and component tokens?",
+      "redFlags": [
+        "Hard-coded colours or spacing inside the component.",
+        "Tenant-specific branches in component code (`if tenant === ...`).",
+        "Only the default theme in visual tests."
+      ],
+      "refs": [
+        {
+          "title": "Design Tokens Format Module 2025.10 (DTCG)",
+          "url": "https://www.designtokens.org/tr/2025.10/format/"
+        },
+        {
+          "title": "W3C: CSS Color Adjustment Module Level 1",
+          "url": "https://www.w3.org/TR/css-color-adjust-1/"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "All strings from the i18n catalogue with plural rules, formatting delegated to locale utilities, RTL and long-content stories in visual regression, and stated limits with the behaviour beyond them (virtualisation, truncation with full text available).",
+      "id": "i18n",
+      "label": "Localisation and long content",
+      "probes": [
+        "Are all built-in strings (button text, announcements, error messages) externalised with ICU plural and gender support, and are any passed in by the caller instead?",
+        "How does it handle 30–40% longer translations, very long single words or file names, and CJK text?",
+        "Does it mirror correctly in RTL using logical properties, and are directional icons mirrored while non-directional ones are not?",
+        "Are numbers, dates, file sizes and currencies formatted through the platform locale utilities rather than inside the component?",
+        "What happens with zero items, one item and very many items (for example 5,000 rows in a document list or 200 parties in a picker)?"
+      ],
+      "question": "Does the component handle translated text, other scripts, right-to-left direction, locale formatting and extreme content lengths without clipping, overlap or loss of meaning?",
+      "redFlags": [
+        "Concatenated strings or English plurals built in code.",
+        "Truncation that hides essential information with no way to reveal it.",
+        "No RTL story."
+      ],
+      "refs": [
+        {
+          "title": "W3C: Structural markup and right-to-left text",
+          "url": "https://www.w3.org/International/questions/qa-html-dir.en.html"
+        },
+        {
+          "title": "W3C: CSS Logical Properties and Values Level 1",
+          "url": "https://www.w3.org/TR/css-logical-1/"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "The component renders text only (or sanitises through one approved function), receives data-access functions from the caller rather than calling APIs itself, emits analytics without case content, and documents which actions require server-side authorisation and audit.",
+      "id": "security",
+      "label": "Data safety in the component",
+      "probes": [
+        "Does it ever render caller- or user-supplied HTML, Markdown or SVG? If so, which sanitiser, and is `dangerouslySetInnerHTML` banned in the component?",
+        "For data-fetching components (party picker, case search combobox), is the fetch function injected by the caller so tenant and permission scoping stays on the server, and is client-side cache keyed by tenant and user?",
+        "Does it put personal or case data into URLs, `data-*` attributes, analytics events, error messages sent to monitoring, or browser storage?",
+        "Do copy, download and preview actions respect the user's permission on that document and log an audit event where required?",
+        "Does it keep sensitive values masked (such as KYC numbers) in the accessible name and screenshots used by visual tests?"
+      ],
+      "question": "Can this component leak case data or personal data, render untrusted content unsafely, or let a user act on data from another tenant or case?",
+      "redFlags": [
+        "Component calls APIs directly with its own tenant logic.",
+        "Raw HTML rendering of user content.",
+        "Personal data in analytics or `data-testid` attributes.",
+        "Real case data in Storybook fixtures or visual baselines."
+      ],
+      "refs": [
+        {
+          "title": "OWASP: Cross Site Scripting Prevention Cheat Sheet (CSS contexts)",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "Defined loading, empty, error and limit behaviour with copy for each, protection against duplicate actions, tested maximum sizes with a stated performance target, and no data loss on error or session expiry.",
+      "id": "resilience",
+      "label": "Async, errors and edge cases",
+      "probes": [
+        "What is shown while loading, and after how long does a skeleton or spinner appear (avoid flashes under 300 ms)?",
+        "How are errors surfaced inline, and can the user retry without losing other input?",
+        "Does it prevent double submission or duplicate actions (double-click on *File*, repeated *Remove*)?",
+        "How does it behave when the session expires or permission is withdrawn mid-interaction?",
+        "What are the tested size limits (rows, options, characters), and what happens beyond them (virtualisation, pagination, server search)?",
+        "How does it behave offline or on a flaky 3G connection?"
+      ],
+      "question": "What does the component do when data is slow, missing, invalid, huge or changes underneath it, and does the user always keep their work and understand what happened?",
+      "redFlags": [
+        "Error state not designed.",
+        "Unbounded lists rendered in full.",
+        "User input cleared after a failed request."
+      ],
+      "refs": [
+        {
+          "title": "W3C WAI: Understanding 3.3.1 Error Identification",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/error-identification"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A size budget with CI measurement, documented server/client split, lazy loading for heavy parts, and a measured interaction time at the stated maximum data size on a reference low-end device.",
+      "id": "performance",
+      "label": "Performance and bundle cost",
+      "probes": [
+        "What is its compressed JavaScript size, including dependencies, and is there a budget checked in CI?",
+        "Can it be imported per component (tree-shaken), and does importing it pull in other heavy modules (date libraries, PDF viewers)?",
+        "Which part must run on the client, and can static parts render as server components?",
+        "Does it cause layout shift on load, image load or font swap (CLS)?",
+        "How long does an interaction take with large data (for example typing in a combobox over 10,000 neutrals), measured on a mid-range Android phone, against an Interaction to Next Paint target of 200 ms?"
+      ],
+      "question": "What does the component add to bundle size and render time, and does it stay fast at realistic data sizes on low-end devices?",
+      "redFlags": [
+        "Whole library imported for one helper.",
+        "No size budget.",
+        "Performance measured only on a developer laptop."
+      ],
+      "refs": [
+        {
+          "title": "web.dev: Web Vitals",
+          "url": "https://web.dev/articles/vitals"
+        },
+        {
+          "title": "Next.js docs: Server and Client Components",
+          "url": "https://nextjs.org/docs/app/getting-started/server-and-client-components"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A story inventory mapped to the states table, interaction tests including keyboard paths, zero-violation axe checks, visual regression on the full theme × mode × direction matrix with named approvers, and published Storybook docs generated from the same source.",
+      "id": "testing",
+      "label": "Test and documentation coverage",
+      "probes": [
+        "Is there a story for each variant × state in this spec, plus edge cases (long text, many items, RTL, error)?",
+        "Do interaction tests cover the keyboard-only path and focus movement, not just mouse clicks?",
+        "Which visual regression tool runs, with what diff threshold, on which matrix of tenant themes, modes and directions, and who approves diffs?",
+        "Are visual baselines rendered in a pinned browser and font environment so they do not flake?",
+        "Does Storybook autodocs show the props table, do and don't guidance and accessibility notes from this spec, and is it published to the team?",
+        "What is the manual assistive-technology test cadence, and who signs it off?"
+      ],
+      "question": "Does every documented variant and state have a story, and do automated interaction, accessibility and visual regression tests run on all of them across the theme matrix on every relevant change?",
+      "redFlags": [
+        "Stories only for the default state.",
+        "Visual tests with thresholds so loose that colour changes pass.",
+        "Accessibility violations suppressed without a tracked issue."
+      ],
+      "refs": [
+        {
+          "title": "Storybook docs: Visual tests",
+          "url": "https://storybook.js.org/docs/writing-tests/visual-testing"
+        },
+        {
+          "title": "Storybook docs: Accessibility tests",
+          "url": "https://storybook.js.org/docs/writing-tests/accessibility-testing"
+        },
+        {
+          "title": "axe-core accessibility engine (Deque)",
+          "url": "https://github.com/dequelabs/axe-core"
+        }
+      ]
+    }
+  ],
+  "child": "requirement",
+  "depth": "2–6 pages per component. The states table, props API and keyboard table must be complete and exact; they are the contract for design, engineering and testing. Link to Figma and Storybook rather than embedding pixel detail. Split into child nodes for sub-components that are used on their own (for example Data table → column header sort, row selection, pagination).",
+  "id": "component",
+  "name": "UI component",
+  "order": 25,
+  "purpose": "Specifies one reusable UI component in the shared design system: what it is for, its parts, variants, states, props API, keyboard and assistive-technology behaviour, content rules, tokens and tests, so it is built once, accessibly, and used the same way in every persona app and tenant.",
+  "sections": [
+    {
+      "example": "**File upload dropzone** lets a party, counsel or the secretariat add one or more documents to a filing or case file, see each file's upload and virus-scan status, and fix problems before submitting.\n\n- Use for: Statement of Claim filing, exhibit upload, transcriber uploading a corrected transcript\n- Do not use for: a single avatar or logo (use *Image picker*), importing a bundle index (use *CSV import*)\n- Pattern basis: native `<input type=\"file\">` plus a list of file rows with status; drag and drop is an enhancement, never the only way",
+      "guide": "What problem the component solves, where it is used in our product, when to use it and when to use something else instead. Name the closest APG pattern if one applies.",
+      "id": "purpose",
+      "label": "Purpose and when to use",
+      "level": 1,
+      "refs": [
+        {
+          "title": "W3C WAI: APG patterns",
+          "url": "https://www.w3.org/WAI/ARIA/apg/patterns/"
+        }
+      ]
+    },
+    {
+      "example": "| Part | Required | Element / role | Notes |\n|---|---|---|---|\n| Label | Yes | `<label>` for the file input | \"Exhibits\" |\n| Hint | No | text linked by `aria-describedby` | \"PDF or DOCX, up to 50 MB each\" |\n| Drop area | Yes | container; contains the *Choose files* button | Visual target only |\n| Choose files button | Yes | `<button>` that opens the native picker | Keyboard path |\n| File list | Yes once files added | `<ul>` of file rows | |\n| File row | — | `<li>`: name, size, status, remove button | |\n| Live status region | Yes | `role=\"status\"` | Announces \"3 files uploaded, 1 failed\" |",
+      "guide": "The named parts of the component, which are required or optional, and the HTML element or ARIA role each part maps to. A labelled diagram link plus a table is ideal.",
+      "id": "anatomy",
+      "label": "Anatomy",
+      "level": 1,
+      "refs": [
+        {
+          "title": "W3C: WAI-ARIA 1.2",
+          "url": "https://www.w3.org/TR/wai-aria-1.2/"
+        }
+      ]
+    },
+    {
+      "example": "| Variant | Use | Differences |\n|---|---|---|\n| `default` | Filing forms | Full drop area, file list below |\n| `compact` | Secretariat case file side panel | Button only, no drop area, dense rows |\n| `single` | Replace one document version | One file, replaces existing on success |\n\nDensities follow the design system (`comfortable`, `compact`). No tenant-specific variants.",
+      "guide": "Each visual or behavioural variant, what it is for, and the sizes or densities it supports. Keep the list short; every variant is a cost in testing and theming.",
+      "id": "variants",
+      "label": "Variants and sizes",
+      "level": 1,
+      "refs": []
+    },
+    {
+      "example": "| State | Visual | Announced |\n|---|---|---|\n| Idle | Dashed border, *Choose files* | Label + hint |\n| Drag over | `color.action.primary.border`, 2 px | — |\n| Uploading | Progress bar per row with % | \"Uploading Exhibit C-12, 40%\" (throttled to every 25%) |\n| Scanning | Spinner + \"Checking file\" | \"Checking Exhibit C-12\" |\n| Failed | Danger icon + text reason, *Retry* | \"Exhibit C-12 failed: larger than 50 MB\" |\n| Ready | Check icon + size | \"Exhibit C-12 ready\" |\n| Disabled (deadline passed) | Muted, explanation text | Reason in hint text |\n\nDisabled is avoided where possible; when used, the reason is always visible as text.",
+      "guide": "Every interaction and data state (default, hover, focus, active, disabled, read-only, loading, error, success and domain states), with what changes visually and what is announced to assistive technology.",
+      "id": "states",
+      "label": "States",
+      "level": 1,
+      "refs": [
+        {
+          "title": "W3C WAI: Understanding 4.1.3 Status Messages",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/status-messages"
+        },
+        {
+          "title": "W3C WAI: Understanding 1.4.1 Use of Color",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/use-of-color"
+        }
+      ]
+    },
+    {
+      "example": "```ts\nexport interface FileDropzoneProps {\n  label: string;                         // required; becomes the accessible name\n  hint?: string;\n  accept: AcceptSpec;                    // e.g. { 'application/pdf': ['.pdf'] }\n  maxSizeBytes: number;\n  maxFiles?: number;                     // default 50\n  variant?: 'default' | 'compact' | 'single';\n  files?: UploadItem[];                  // controlled\n  defaultFiles?: UploadItem[];           // uncontrolled\n  onFilesChange?: (files: UploadItem[]) => void;\n  upload: (file: File, signal: AbortSignal) => Promise<UploadResult>; // injected, tenant-scoped by caller\n  disabledReason?: string;               // presence disables and shows reason\n  id?: string;\n}\nexport type UploadItem =\n  | { status: 'queued' | 'uploading'; id: string; name: string; size: number; progress?: number }\n  | { status: 'scanning' | 'ready'; id: string; name: string; size: number; documentId: string }\n  | { status: 'failed'; id: string; name: string; size: number; error: UploadErrorCode };\n```\nNo `className` overrides of internal parts; layout via wrapper only. Ref forwards to the native file input.",
+      "guide": "The TypeScript props contract: names, types, defaults, required flags, events and slots, controlled versus uncontrolled usage, ref forwarding and which DOM attributes pass through. This is the contract consumers code against.",
+      "id": "api",
+      "label": "Props API",
+      "level": 1,
+      "refs": [
+        {
+          "title": "React docs: <input> (controlled and uncontrolled)",
+          "url": "https://react.dev/reference/react-dom/components/input"
+        }
+      ]
+    },
+    {
+      "example": "- Client component (`'use client'`); the page passing `upload` stays a server component and provides a server action or tRPC mutation\n- Validates type and size before upload; server re-validates (client checks are convenience only)\n- Uploads up to 3 files in parallel; each can be cancelled (AbortSignal)\n- Duplicate file name in the same filing: warns and asks \"Keep both\" or \"Replace\"\n- Integrates with React Hook Form via `Controller`; form submit is blocked until all rows are `ready`\n- Navigating away with uploads in progress shows the browser leave-page prompt",
+      "guide": "How the component responds to input, timing, async work and data limits; what is client-side versus server-side; how it behaves inside forms (React Hook Form, Zod validation) and whether it is a server or client component.",
+      "id": "behaviour",
+      "label": "Behaviour",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Next.js docs: Server and Client Components",
+          "url": "https://nextjs.org/docs/app/getting-started/server-and-client-components"
+        }
+      ]
+    },
+    {
+      "example": "| Key | Where | Action |\n|---|---|---|\n| Tab | Page | Moves to *Choose files*, then each row's *Retry* / *Remove* |\n| Enter / Space | *Choose files* | Opens native file picker |\n| Enter / Space | *Remove* | Removes the file; focus moves to next row's *Remove*, or to *Choose files* if none |\n\n- *Remove* has the name \"Remove Exhibit C-12\" (visible text \"Remove\" is included, per 2.5.3)\n- Drag and drop has a keyboard and single-pointer alternative (2.5.7)\n- Focus ring uses `color.focus.ring`, never hidden by the sticky filing footer (2.4.11)\n- Tested with NVDA + Firefox, JAWS + Chrome, VoiceOver + Safari (macOS and iOS), TalkBack + Chrome",
+      "guide": "Keyboard interaction table, focus order and where focus goes after each action, ARIA roles, states and properties, accessible names, live announcements, and the WCAG 2.2 criteria this component must meet.",
+      "id": "keyboard",
+      "label": "Keyboard, focus and assistive technology",
+      "level": 1,
+      "refs": [
+        {
+          "title": "W3C WAI: APG Developing a keyboard interface",
+          "url": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+        },
+        {
+          "title": "W3C WAI: Understanding 2.5.7 Dragging Movements",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements"
+        },
+        {
+          "title": "W3C WAI: Understanding 2.4.11 Focus Not Obscured (Minimum)",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/focus-not-obscured-minimum"
+        }
+      ]
+    },
+    {
+      "example": "- Label names the document set, not the action: \"Exhibits\", not \"Upload here\"\n- Errors say what happened and what to do: \"Exhibit C-12 is 72 MB. Files must be 50 MB or smaller. Compress it or split it into parts.\"\n- Never blame the user; never show technical codes alone\n- All strings come from the i18n catalogue (`upload.error.tooLarge`) with ICU plurals (\"1 file\", \"3 files\")\n- Tenants may override terminology through the terminology keys (e.g. \"Exhibits\" vs \"Annexures\"), not individual component strings",
+      "guide": "Rules and examples for labels, hints, error messages, empty and success text, including tone, length limits, legal wording and which strings are translatable or tenant-overridable.",
+      "id": "content",
+      "label": "Content guidelines",
+      "level": 2,
+      "refs": [
+        {
+          "title": "W3C WAI: Understanding 3.3.1 Error Identification",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/error-identification"
+        },
+        {
+          "title": "W3C WAI: Understanding 3.3.2 Labels or Instructions",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/labels-or-instructions"
+        }
+      ]
+    },
+    {
+      "example": "| Part / state | Token |\n|---|---|\n| Drop area border | `color.border.input`, `border.width.dashed` |\n| Drop area border, drag over | `color.action.primary.border` |\n| Row text | `type.body.sm`, `color.text.default` |\n| Failed icon + text | `color.feedback.danger.text` |\n| Progress bar | `color.action.primary.bg`, `motion.duration.moderate` |\n| Row spacing | `space.2` (compact), `space.3` (comfortable) |\n| Focus | `color.focus.ring`, `focus.ring.width`, `focus.ring.offset` |\n\nNew component tokens: `dropzone.border.style` (alias of `border.style.dashed`).",
+      "guide": "Every design token the component uses, by part and state. Only semantic or component-tier tokens; list any new component tokens this spec introduces.",
+      "id": "tokens",
+      "label": "Tokens used",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Design Tokens Format Module 2025.10 (DTCG)",
+          "url": "https://www.designtokens.org/tr/2025.10/format/"
+        }
+      ]
+    },
+    {
+      "example": "- Below `bp.md`: drop area text hidden (touch users cannot drag), *Choose files* full width, rows stack name over status\n- 320 px / 400% zoom: no horizontal scrolling (1.4.10); long file names wrap with `overflow-wrap: anywhere`, full name in the accessible name\n- RTL: icon and remove button positions mirror via logical properties; the progress bar fills from inline-start\n- Touch targets for *Remove* at least 44 × 44 px in comfortable density",
+      "guide": "What changes at each breakpoint and on touch devices, behaviour at 320 CSS px width and 200–400% zoom, long-content handling and right-to-left layout.",
+      "id": "responsive",
+      "label": "Responsive behaviour and direction",
+      "level": 2,
+      "refs": [
+        {
+          "title": "W3C WAI: Understanding 1.4.10 Reflow",
+          "url": "https://www.w3.org/WAI/WCAG22/Understanding/reflow"
+        },
+        {
+          "title": "W3C: CSS Logical Properties and Values Level 1",
+          "url": "https://www.w3.org/TR/css-logical-1/"
+        }
+      ]
+    },
+    {
+      "example": "```tsx\n<FileDropzone\n  label={t('filing.exhibits.label')}\n  hint={t('filing.exhibits.hint', { max: '50 MB' })}\n  accept={{ 'application/pdf': ['.pdf'] }}\n  maxSizeBytes={50 * 1024 * 1024}\n  upload={(file, signal) => uploadExhibit({ caseId, file, signal })}\n  disabledReason={deadlinePassed ? t('filing.deadlinePassed', { date }) : undefined}\n/>\n```\n- Do: one dropzone per document category in the Statement of Claim form\n- Don't: hide the dropzone after the deadline; disable it and say why\n- Stories: `Default`, `WithErrors`, `ManyFiles` (200 rows), `DeadlinePassed`, `RTL`, `HKIACTheme`, `Dark`",
+      "guide": "Copy-pasteable code for the common cases, plus do and don't examples. Each example should have a matching Storybook story.",
+      "id": "examples",
+      "label": "Usage examples",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Storybook docs: Component Story Format (CSF)",
+          "url": "https://storybook.js.org/docs/api/csf"
+        }
+      ]
+    },
+    {
+      "example": "| Test | Tool | Runs | Passes when |\n|---|---|---|---|\n| Interaction | Storybook interaction tests | Every PR | Add, fail, retry, remove, keyboard-only path |\n| Automated a11y | axe-core via Storybook | Every PR, every story | Zero violations (no exemptions without an issue) |\n| Visual regression | Storybook visual tests / Playwright `toHaveScreenshot` | Every PR touching `packages/ui` or tokens | Diff ≤ 0.1% or approved |\n| Matrix | — | — | Base + every active tenant theme × light/dark × LTR/RTL |\n| Manual AT | NVDA, VoiceOver, TalkBack | Each minor release | Checklist signed off |",
+      "guide": "Which stories exist, what interaction, accessibility and visual regression tests run on them in CI, the theme and mode matrix, thresholds, and the manual assistive-technology test schedule.",
+      "id": "testing",
+      "label": "Testing",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Storybook docs: Interaction tests",
+          "url": "https://storybook.js.org/docs/writing-tests/interaction-testing"
+        },
+        {
+          "title": "Storybook docs: Accessibility tests",
+          "url": "https://storybook.js.org/docs/writing-tests/accessibility-testing"
+        },
+        {
+          "title": "Playwright: Visual comparisons",
+          "url": "https://playwright.dev/docs/test-snapshots"
+        }
+      ]
+    },
+    {
+      "example": "- [ ] Do we allow folder upload for large exhibit sets? (Product)\n- [ ] Should virus-scan failure reveal the detection name to parties? (Security)\n- [ ] Resumable uploads for files over 500 MB on poor networks? (Engineering)",
+      "guide": "Unresolved items as a checklist, each with an owner.",
+      "id": "questions",
+      "label": "Open questions",
+      "level": 3,
+      "refs": []
+    }
+  ],
+  "sources": [
+    {
+      "title": "W3C WAI: ARIA Authoring Practices Guide",
+      "url": "https://www.w3.org/WAI/ARIA/apg/"
+    },
+    {
+      "title": "W3C: WAI-ARIA 1.2",
+      "url": "https://www.w3.org/TR/wai-aria-1.2/"
+    },
+    {
+      "title": "W3C: WCAG 2.2",
+      "url": "https://www.w3.org/TR/WCAG22/"
+    },
+    {
+      "title": "Storybook docs: Component Story Format (CSF)",
+      "url": "https://storybook.js.org/docs/api/csf"
+    },
+    {
+      "title": "Storybook docs: Interaction tests",
+      "url": "https://storybook.js.org/docs/writing-tests/interaction-testing"
+    },
+    {
+      "title": "Storybook docs: Visual tests",
+      "url": "https://storybook.js.org/docs/writing-tests/visual-testing"
+    },
+    {
+      "title": "Storybook docs: Accessibility tests",
+      "url": "https://storybook.js.org/docs/writing-tests/accessibility-testing"
+    },
+    {
+      "title": "Design Tokens Format Module 2025.10 (DTCG)",
+      "url": "https://www.designtokens.org/tr/2025.10/format/"
+    },
+    {
+      "title": "W3C WAI: APG patterns",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/"
+    },
+    {
+      "title": "W3C WAI: Understanding 4.1.3 Status Messages",
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/status-messages"
+    },
+    {
+      "title": "W3C WAI: Understanding 1.4.1 Use of Color",
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/use-of-color"
+    },
+    {
+      "title": "React docs: <input> (controlled and uncontrolled)",
+      "url": "https://react.dev/reference/react-dom/components/input"
+    }
+  ],
+  "useFor": "Components in the shared UI package (5.14 PKG-ui-design-system): for example file upload dropzone, data table for the case list, date-time picker with time zones for the hearing scheduler, combobox party picker, modal dialog for consequential confirmations, case timeline, deadline badge, tenant switcher, document viewer. Not for full screens or journeys (use the UI screen and user journey template)."
+}

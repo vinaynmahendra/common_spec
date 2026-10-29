@@ -1,0 +1,478 @@
+{
+  "checks": [
+    {
+      "goodAnswer": "A network table (source, destination, port, reason) showing no public exposure, the IAM roles split into admin and runtime with least-privilege policies in the IaC module, and the encryption settings with KMS key ARNs per region. Credentials live in the regional secrets manager with an automatic rotation period stated. Names the hardening baseline and the tool that reports drift, and the patch window for critical vulnerabilities (for example 7 days).",
+      "id": "security",
+      "label": "Security",
+      "probes": [
+        "Which subnets and security groups (or Azure network security groups / private endpoints) does it sit in, is it free of any public IP or public endpoint, and which exact sources may connect on which ports?",
+        "Which IAM roles / managed identities can administer it versus use it, and is human admin access through short-lived, MFA-backed sessions with a logged break-glass path rather than standing credentials?",
+        "Is TLS required on every connection (Postgres sslmode=verify-full, Redis TLS, Temporal mTLS between frontend, history and workers), and with which minimum TLS version?",
+        "Is data at rest encrypted with a customer-managed KMS key per region (Postgres storage, snapshots, Redis, S3, Temporal persistence), who can use the key, and is key rotation on?",
+        "How are credentials for the component (DB passwords, Redis ACL users, Temporal certificates) stored and rotated, and how long does a rotation take to reach all services?",
+        "Which hardening baseline applies (CIS Benchmark for the OS or service, Postgres parameters such as password_encryption=scram-sha-256, Redis ACLs with the default user disabled), and how is drift from it detected?",
+        "How are patches and security fixes for the engine version applied, and within what time after a critical CVE?"
+      ],
+      "question": "Is the component reachable only by the services that need it, accessed only with least-privilege identities, and encrypted in transit and at rest with keys we control per region?",
+      "redFlags": [
+        "Any public endpoint or 0.0.0.0/0 ingress rule",
+        "Shared admin password or long-lived access keys for humans",
+        "TLS optional, or certificate verification disabled in clients",
+        "Encryption with a provider-default key that cannot be scoped or revoked per region"
+      ],
+      "refs": [
+        {
+          "title": "AWS Well-Architected Framework: Security Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html"
+        },
+        {
+          "title": "CIS Benchmarks",
+          "url": "https://www.cisecurity.org/cis-benchmarks-overview"
+        },
+        {
+          "title": "AWS Secrets Manager: managed rotation",
+          "url": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotate-secrets_managed.html"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A per-region table listing each data copy (primary, replica, backup, snapshot, log, metric) with its location and retention. States that cross-region copies are disabled or, where used for disaster recovery, stay within an approved jurisdiction with the legal basis written down. Shows the organisation-level guardrail that blocks resource creation outside allowed regions and the CERT-In log retention setting for India.",
+      "id": "residency",
+      "label": "Data residency",
+      "probes": [
+        "Where do replicas, automated backups, manual snapshots and point-in-time recovery logs live? Is any cross-region backup copy enabled, and if so to which region and why is that lawful?",
+        "Where do the component's logs, slow-query logs, audit logs and metrics go? Do any contain tenant data (query text with parameters, Redis keys, Temporal workflow payloads) and do they leave the region (for example a central logging account in another country)?",
+        "Are Temporal workflow histories and payloads stored in the regional Temporal persistence store, and are payloads encrypted with a regional key via a payload codec?",
+        "Does anyone outside the region (support staff, on-call engineers, managed-service vendors) have access to data, and is that access logged and allowed under DPDP, PDPA and client contracts?",
+        "What policy guardrails stop resources being created in the wrong region (Service Control Policies / Azure Policy region allow-lists)?",
+        "For India-region components, are system logs kept within India for at least the period required by CERT-In directions (180 days)?"
+      ],
+      "question": "Does every copy of tenant data held or produced by this component (primary, replicas, backups, snapshots, logs, metrics, dumps) stay inside the tenant's pinned region?",
+      "redFlags": [
+        "Backups copied to a different country 'for DR' with no legal review",
+        "Central observability stack in one region receiving raw logs from all regions",
+        "Temporal payloads stored in plain text",
+        "No preventive guardrail, only a promise in the document"
+      ],
+      "refs": [
+        {
+          "title": "CERT-In Directions under section 70B(6) of the IT Act (28 April 2022)",
+          "url": "https://www.cert-in.org.in/PDF/CERT-In_Directions_70B_28.04.2022.pdf"
+        },
+        {
+          "title": "Digital Personal Data Protection Act, 2023 (MeitY)",
+          "url": "https://www.meity.gov.in/static/uploads/2024/02/Digital-Personal-Data-Protection-Act-2023.pdf"
+        },
+        {
+          "title": "PDPC Advisory Guidelines: The Transfer Limitation Obligation (Chapter 19)",
+          "url": "https://www.pdpc.gov.sg/-/media/files/pdpc/pdf-files/advisory-guidelines/the-transfer-limitation-obligation---ch-19-(270717).pdf"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A failure-mode table with detection, automatic or manual response, expected data loss and recovery time for each scenario. RPO and RTO are stated as numbers and tied to client commitments. The latest drill is referenced with date, measured restore time and validation method, and backups are protected from deletion by a separate account or lock.",
+      "id": "dr",
+      "label": "Resilience and recovery",
+      "probes": [
+        "What are the RPO and RTO numbers, and do they match the platform's commitments to clients (for example hearing days, filing deadlines, SEBI ODR timelines)?",
+        "Which failures are covered: single instance, availability zone, whole region, accidental deletion, data corruption, ransomware, loss of the cloud account? What is the response for each?",
+        "Are backups immutable or in a separate account / vault lock so an attacker with production admin rights cannot delete them?",
+        "When was the last full restore drill, how long did it take compared with the RTO, and how was the restored data checked for completeness (row counts, checksums, an application smoke test)?",
+        "For Postgres: is the failover tested with PgBouncer and Prisma reconnecting cleanly? For Redis: what BullMQ jobs are lost if Redis fails, and how are they recovered? For Temporal: can workflows resume after the persistence store is restored?",
+        "Since tenants are pinned to a region and data cannot leave it, what is the plan if a whole region is lost, and has that limit been explained to clients?",
+        "How often are drills run (at least yearly for full restore; quarterly for failover), and where are results recorded as ISO 27001 / SOC 2 evidence?"
+      ],
+      "question": "Are the recovery point objective (how much data we can lose) and recovery time objective (how long we can be down) defined for this component, designed for, and proven by a recent restore drill?",
+      "redFlags": [
+        "RPO/RTO stated but never tested",
+        "Backups in the same account and deletable by the same admin role",
+        "No answer for region loss, or an answer that silently moves data to another country",
+        "Redis treated as durable when it holds the only copy of job state"
+      ],
+      "refs": [
+        {
+          "title": "AWS Well-Architected Framework: Reliability Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html"
+        },
+        {
+          "title": "Temporal: production readiness checklist (self-hosted)",
+          "url": "https://docs.temporal.io/self-hosted-guide/production-checklist"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "Shows the configuration that enforces isolation at this layer (forced RLS and role grants, pooler mode, Redis ACLs) and the per-tenant limits with their numbers. Explains how heavy workloads are queued fairly and how a dedicated-infrastructure tenant is provisioned from the same IaC modules with different parameters.",
+      "id": "isolation",
+      "label": "Tenant isolation and noisy neighbours",
+      "probes": [
+        "For Postgres: is Row-Level Security forced on every tenant table (ALTER TABLE ... FORCE ROW LEVEL SECURITY), and do application roles lack BYPASSRLS and table ownership?",
+        "For PgBouncer: is transaction pooling configured so session state cannot carry between clients (tenant set with SET LOCAL only, server_reset_query behaviour understood)?",
+        "Which per-tenant limits exist (connection share, statement_timeout, BullMQ rate limits and concurrency per tenant, Temporal namespace or task-queue rate limits)?",
+        "Can one tenant's large job (bulk upload, eBundle generation, transcription) starve others, and what queueing or fair-scheduling prevents it?",
+        "Are there tenants who require dedicated infrastructure (for example a client requiring Azure or a dedicated database), and how does the IaC support that without a separate code path?",
+        "How are Redis key namespaces and ACLs set so a compromised service cannot read other services' keys?"
+      ],
+      "question": "Is the component configured so one tenant can neither see another tenant's data nor exhaust resources that other tenants depend on?",
+      "redFlags": [
+        "RLS enabled but not forced, or the app connects as table owner",
+        "No statement timeout or per-tenant concurrency limits",
+        "One global BullMQ queue with no per-tenant fairness for heavy jobs"
+      ],
+      "refs": [
+        {
+          "title": "PostgreSQL documentation: Row Security Policies",
+          "url": "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
+        },
+        {
+          "title": "PgBouncer features (what works under transaction pooling)",
+          "url": "https://www.pgbouncer.org/features.html"
+        },
+        {
+          "title": "Redis documentation: ACL",
+          "url": "https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "Names the module path, state backend, pipeline that applies changes and the approvals required. A table lists per-region and per-cloud differences. Drift detection runs on a schedule with alert routing, and policy checks block non-compliant plans before apply.",
+      "id": "iac",
+      "label": "Infrastructure as code and change control",
+      "probes": [
+        "Which IaC module defines it (Terraform/OpenTofu, CDK, Bicep), where is the state stored and locked, and is state itself encrypted and access-restricted?",
+        "Are regions and environments (dev, staging, prod in India, Singapore, US, plus Azure variants) produced from the same module with a parameter file each, and what are the allowed differences?",
+        "How are changes reviewed and applied (plan in CI, approval by a code owner, apply from a pipeline identity, not a laptop)?",
+        "How is drift detected and how often (scheduled plan, AWS Config / Azure Policy), and who is alerted?",
+        "Which changes are risky (engine version upgrades, parameter changes needing reboot, storage changes) and what is the change process for them (maintenance window, client notice, rollback plan)?",
+        "Are policy-as-code checks run on the plan (no public resources, encryption on, required tags, allowed regions)?"
+      ],
+      "question": "Can this component be created, changed and rebuilt in every region and environment only from reviewed code, with no manual console changes?",
+      "redFlags": [
+        "Resources created or modified by hand in the console",
+        "Applies run from engineer laptops with personal credentials",
+        "Each region has its own hand-edited copy of the code",
+        "No drift detection"
+      ],
+      "refs": [
+        {
+          "title": "OWASP CI/CD Security Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/CI_CD_Security_Cheat_Sheet.html"
+        },
+        {
+          "title": "Microsoft Azure Well-Architected Framework",
+          "url": "https://learn.microsoft.com/en-us/azure/well-architected/"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A table of alerts: signal, threshold, severity, route, runbook link. Paging is limited to user-impacting symptoms using SLO burn-rate alerts; everything else becomes a ticket. Dashboards exist per region, synthetic checks run continuously, and audit/security logs flow to the security monitoring system in-region.",
+      "id": "observability",
+      "label": "Monitoring and alerting",
+      "probes": [
+        "What are the key health signals (for Postgres: replication lag, connections versus pool limits, disk, long transactions, deadlocks; for Redis: memory, evictions, BullMQ waiting and failed counts; for Temporal: schedule-to-start latency, persistence latency, workflow task failures)?",
+        "Which alerts page someone and which only create a ticket? Are paging alerts based on user-facing symptoms and error budgets rather than every resource metric?",
+        "Does every alert have an owner, a severity, a runbook link and a tested notification route for each region?",
+        "Is there a synthetic check per region that exercises the component end to end?",
+        "Are capacity alerts set early enough to act (for example disk at 70% with a growth forecast), and is certificate and credential expiry monitored?",
+        "Where do security-relevant events go (failed logins, privilege changes, configuration changes) and are they retained per CERT-In and ISO 27001 requirements?"
+      ],
+      "question": "Will we learn about a problem with this component from an alert before a client tells us, and does each alert lead an on-call engineer to a concrete runbook step?",
+      "redFlags": [
+        "Alerts with no runbook or no owner",
+        "Paging on raw CPU or memory thresholds only",
+        "No monitoring of backups succeeding or of certificate expiry"
+      ],
+      "refs": [
+        {
+          "title": "Google SRE Workbook: Alerting on SLOs",
+          "url": "https://sre.google/workbook/alerting-on-slos/"
+        },
+        {
+          "title": "Temporal: production readiness checklist (self-hosted)",
+          "url": "https://docs.temporal.io/self-hosted-guide/production-checklist"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "Gives version and end-of-support dates with a scheduled upgrade, a linked runbook that has been followed by someone other than its author, the on-call rota and escalation contacts, and the status of the production readiness checklist. States the incident-reporting path with regulatory deadlines.",
+      "id": "lifecycle",
+      "label": "Operations and lifecycle",
+      "probes": [
+        "Which engine version is used (Postgres, Redis, Temporal server, PgBouncer), when does it reach end of support, and what is the upgrade plan and test approach?",
+        "Is there a written runbook for routine tasks (scaling, failover, restore, credential rotation, adding a region, onboarding a dedicated-infrastructure tenant) and for incidents?",
+        "Who is on call for it in each time zone covering India, Singapore and US clients, and what is the escalation path including the cloud vendor?",
+        "How are maintenance windows chosen given hearings and deadlines across time zones, and how are tenants notified?",
+        "What production readiness review was completed, and which items are still open?",
+        "How is a security incident involving this component reported within the required times (CERT-In 6 hours for India, DPDP Board notification, client contractual windows)?"
+      ],
+      "question": "Can the team run this component day to day, upgrade it before its version goes out of support, and hand it to a new on-call engineer without tribal knowledge?",
+      "redFlags": [
+        "Engine version already out of support or within 6 months of it with no plan",
+        "Runbook missing or untested",
+        "Only one person knows how to operate the component"
+      ],
+      "refs": [
+        {
+          "title": "Temporal: production readiness checklist (self-hosted)",
+          "url": "https://docs.temporal.io/self-hosted-guide/production-checklist"
+        },
+        {
+          "title": "CERT-In Directions under section 70B(6) of the IT Act (28 April 2022)",
+          "url": "https://www.cert-in.org.in/PDF/CERT-In_Directions_70B_28.04.2022.pdf"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A cost table per region with a stated unit cost (for example cost per active tenant per month) and growth projection, enforced cost-allocation tags, budgets with anomaly alerts and an owner. Savings options are listed with a decision for each.",
+      "id": "cost",
+      "label": "Cost",
+      "probes": [
+        "What is the monthly estimate per region and environment, broken into compute, storage, backups, data transfer, licences and support?",
+        "What is the cost driver (per tenant, per case, per GB, per hour of hearing transcription) and what is the projected cost at 2x and 10x current volume?",
+        "Are resources tagged with region, environment, component and (where possible) tenant so cost can be allocated, and is the tagging enforced by policy?",
+        "Are there budgets and anomaly alerts per region, routed to a named owner?",
+        "Which savings levers apply (reserved capacity or savings plans, right-sizing, storage tiering, turning off non-production at night) and which have been rejected because of resilience or residency needs?",
+        "For dedicated-infrastructure or Azure tenants, is the extra cost captured in pricing?"
+      ],
+      "question": "Do we know what this component costs each month per region, what drives the cost as tenants grow, and who is told when it goes over budget?",
+      "redFlags": [
+        "No per-region estimate",
+        "Cross-region data transfer costs ignored",
+        "No budget alert, so cost overruns are found on the invoice"
+      ],
+      "refs": [
+        {
+          "title": "AWS Well-Architected Framework: Cost Optimization Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html"
+        },
+        {
+          "title": "FinOps Foundation: FinOps Framework",
+          "url": "https://www.finops.org/framework/"
+        }
+      ]
+    }
+  ],
+  "child": "requirement",
+  "depth": "3–8 pages. Topology, sizing, HA/DR targets and the runbook are mandatory for Approved. Use the Well-Architected pillars as the review lens and a production readiness review as the go-live gate. Region-specific differences go in a table, not separate nodes, unless they diverge materially.",
+  "id": "infra",
+  "name": "Infrastructure component",
+  "order": 11,
+  "purpose": "Specifies a piece of runtime infrastructure so it can be built from code, operated safely in every region, and recovered when it fails.",
+  "sections": [
+    {
+      "example": "Redis per region serves BullMQ queues (notifications, scans, indexing) and the application cache. Loss of Redis delays background jobs and slows pages; it must never lose queued jobs that represent legal notifications.",
+      "guide": "What the component does for the platform and which services depend on it.",
+      "id": "purpose",
+      "label": "Purpose and responsibilities",
+      "level": 1,
+      "refs": [
+        {
+          "title": "AWS Well-Architected: Reliability Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html"
+        }
+      ]
+    },
+    {
+      "example": "| Region | Environment | Deployment |\n|---|---|---|\n| India (Mumbai) | prod | Managed Redis, primary + replica across 2 AZs |\n| Singapore | prod | Same |\n| US | prod | Same |\n| India | staging | Single node |",
+      "guide": "Diagram and table of deployment per region and environment.",
+      "id": "topology",
+      "label": "Topology per region",
+      "level": 1,
+      "refs": [
+        {
+          "title": "AWS Well-Architected: Reliability Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html"
+        },
+        {
+          "title": "Microsoft Azure Well-Architected Framework",
+          "url": "https://learn.microsoft.com/en-us/azure/well-architected/"
+        }
+      ]
+    },
+    {
+      "example": "Start: 2 vCPU / 6 GB per region. Scale up at 70% memory or > 5k ops/s sustained. Queue and cache use separate logical DBs; split into two clusters if cache evictions affect queues.",
+      "guide": "Starting size, growth assumptions, scaling triggers.",
+      "id": "sizing",
+      "label": "Sizing and scaling",
+      "level": 1,
+      "refs": [
+        {
+          "title": "AWS Well-Architected: Reliability Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html"
+        }
+      ]
+    },
+    {
+      "example": "`maxmemory-policy noeviction` on the queue cluster (jobs must not be evicted); AOF persistence every second; TLS required; IaC module `infra/modules/redis` with per-region variables.",
+      "guide": "Key settings and why; where configuration lives (IaC module).",
+      "id": "config",
+      "label": "Configuration baseline",
+      "level": 2,
+      "refs": [
+        {
+          "title": "CIS Benchmarks",
+          "url": "https://www.cisecurity.org/cis-benchmarks-overview"
+        },
+        {
+          "title": "PgBouncer features (transaction pooling)",
+          "url": "https://www.pgbouncer.org/features.html"
+        },
+        {
+          "title": "Redis documentation: ACL",
+          "url": "https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/"
+        }
+      ]
+    },
+    {
+      "example": "| Failure | Behaviour | RPO | RTO |\n|---|---|---|---|\n| Primary node loss | Automatic failover to replica | ≤ 1 s | < 2 min |\n| Region loss | No cross-region failover (residency); jobs replayed from Postgres outbox | 0 for notifications | Region restore |\n\nRestore drill every 6 months.",
+      "guide": "Failure modes, RPO / RTO, failover behaviour, backup and restore, drill frequency.",
+      "id": "resilience",
+      "label": "High availability and DR",
+      "level": 1,
+      "refs": [
+        {
+          "title": "AWS Well-Architected: Reliability Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html"
+        }
+      ]
+    },
+    {
+      "example": "Private subnets only; reachable from app and worker security groups. AUTH token in secrets manager, rotated quarterly. Encryption at rest with region KMS key.",
+      "guide": "Network placement, access, auth, encryption, secrets.",
+      "id": "security",
+      "label": "Security",
+      "level": 1,
+      "refs": [
+        {
+          "title": "AWS Well-Architected: Security Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html"
+        },
+        {
+          "title": "AWS Secrets Manager: managed rotation",
+          "url": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotate-secrets_managed.html"
+        },
+        {
+          "title": "CIS Benchmarks",
+          "url": "https://www.cisecurity.org/cis-benchmarks-overview"
+        }
+      ]
+    },
+    {
+      "example": "- High memory: check queue backlogs first (`bullmq:*:wait` lengths), then cache key growth\n- Failover: verify app reconnects; check worker logs for `ECONNRESET` storms",
+      "guide": "Routine operations and incident steps, or a link to the runbook node.",
+      "id": "operations",
+      "label": "Runbook",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Google SRE book: Production Readiness Review",
+          "url": "https://sre.google/sre-book/evolving-sre-engagement-model/"
+        },
+        {
+          "title": "CERT-In Directions under section 70B(6), 28 April 2022",
+          "url": "https://www.cert-in.org.in/Directions70B.jsp"
+        }
+      ]
+    },
+    {
+      "example": "Alerts: memory > 80% (warn), > 90% (page); replication lag > 5 s; any queue wait > 10k jobs.",
+      "guide": "Metrics, dashboards, alert thresholds and routing.",
+      "id": "observability",
+      "label": "Monitoring and alerts",
+      "level": 2,
+      "refs": []
+    },
+    {
+      "example": "≈ USD 250 / region / month at starting size.",
+      "guide": "Estimated monthly cost per region and drivers.",
+      "id": "cost",
+      "label": "Cost",
+      "level": 3,
+      "refs": [
+        {
+          "title": "AWS Well-Architected: Cost Optimization Pillar",
+          "url": "https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html"
+        },
+        {
+          "title": "FinOps Foundation: FinOps Framework",
+          "url": "https://www.finops.org/framework/"
+        }
+      ]
+    },
+    {
+      "example": "- [x] IaC reviewed\n- [ ] Restore drill passed\n- [ ] Alerts routed to on-call",
+      "guide": "Go-live checklist status.",
+      "id": "readiness",
+      "label": "Production readiness",
+      "level": 2,
+      "refs": [
+        {
+          "title": "GitLab production readiness review",
+          "url": "https://handbook.gitlab.com/handbook/engineering/infrastructure/production/readiness"
+        },
+        {
+          "title": "Google SRE book: Production Readiness Review",
+          "url": "https://sre.google/sre-book/evolving-sre-engagement-model/"
+        }
+      ]
+    },
+    {
+      "example": "- [ ] Azure Cache for Redis equivalence for clients requiring Azure",
+      "guide": "Checklist.",
+      "id": "questions",
+      "label": "Open questions",
+      "level": 3,
+      "refs": []
+    }
+  ],
+  "sources": [
+    {
+      "title": "AWS Well-Architected: Reliability Pillar",
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html"
+    },
+    {
+      "title": "Microsoft Azure Well-Architected Framework",
+      "url": "https://learn.microsoft.com/en-us/azure/well-architected/"
+    },
+    {
+      "title": "CIS Benchmarks",
+      "url": "https://www.cisecurity.org/cis-benchmarks-overview"
+    },
+    {
+      "title": "PgBouncer features (transaction pooling)",
+      "url": "https://www.pgbouncer.org/features.html"
+    },
+    {
+      "title": "Redis documentation: ACL",
+      "url": "https://redis.io/docs/latest/operate/oss_and_stack/management/security/acl/"
+    },
+    {
+      "title": "AWS Well-Architected: Security Pillar",
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html"
+    },
+    {
+      "title": "AWS Secrets Manager: managed rotation",
+      "url": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotate-secrets_managed.html"
+    },
+    {
+      "title": "Google SRE book: Production Readiness Review",
+      "url": "https://sre.google/sre-book/evolving-sre-engagement-model/"
+    },
+    {
+      "title": "CERT-In Directions under section 70B(6), 28 April 2022",
+      "url": "https://www.cert-in.org.in/Directions70B.jsp"
+    },
+    {
+      "title": "AWS Well-Architected: Cost Optimization Pillar",
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html"
+    },
+    {
+      "title": "FinOps Foundation: FinOps Framework",
+      "url": "https://www.finops.org/framework/"
+    },
+    {
+      "title": "GitLab production readiness review",
+      "url": "https://handbook.gitlab.com/handbook/engineering/infrastructure/production/readiness"
+    }
+  ],
+  "useFor": "Compute and orchestration, Postgres, PgBouncer, Redis, Temporal cluster, networking, secrets and keys, backup and disaster recovery"
+}

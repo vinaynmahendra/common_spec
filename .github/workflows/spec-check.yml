@@ -1,0 +1,19 @@
+name: spec-check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate specs
+        run: python3 tools/specs.py check
+      - name: Generated files are up to date
+        run: |
+          python3 tools/specs.py index
+          git diff --exit-code -- specs/README.md meta/open-questions.md templates || (echo "Run: python3 tools/specs.py index" && exit 1)

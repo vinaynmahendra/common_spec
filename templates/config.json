@@ -1,0 +1,232 @@
+{
+  "checks": [
+    {
+      "goodAnswer": "Every key lists its scopes and lockability; resolution follows the shared hierarchy with no per-feature exceptions; the console shows the effective value, its source scope and lock state; locking a value either clears or freezes lower overrides by a documented rule, and the admin is told how many overrides are affected before confirming.",
+      "id": "inheritance",
+      "label": "Inheritance and locks",
+      "probes": [
+        "Is each key's allowed scope list explicit, and is the resolution order the one defined in [[PKG-configuration-scope-hierarchy]]?",
+        "Can a higher scope lock a value, and is a locked value shown as locked (with its source) everywhere it appears?",
+        "What happens to explicit lower-scope values when a higher scope later locks the setting?"
+      ],
+      "question": "For every setting, is it unambiguous which value applies to a given user, case and tenant, and why?",
+      "redFlags": [
+        "Features reading settings directly from tables instead of the resolver",
+        "Locks that silently ignore lower values without telling anyone",
+        "Different inheritance rules per domain"
+      ],
+      "refs": []
+    },
+    {
+      "goodAnswer": "Each group maps to one named permission; delegated admin roles hold only their domain's permission; changes that weaken security, privacy or legal notices need a second approver; platform-only settings cannot be changed by any tenant role.",
+      "id": "permissions",
+      "label": "Who may change what",
+      "probes": [
+        "Which permission from [[PKG-permission-catalogue]] guards each group?",
+        "Can a delegated admin (for example a branding admin) change only their domain?",
+        "Are security-weakening changes subject to maker-checker ([[PKG-separation-of-duties]])?"
+      ],
+      "question": "Is the permission needed to change each setting defined, scoped and least-privilege?",
+      "redFlags": [
+        "One 'admin' permission for every setting",
+        "Tenant admins able to change platform-only keys via the API",
+        "No second approver for disabling MFA or audit"
+      ],
+      "refs": [
+        {
+          "title": "Salesforce Help: Permission sets and profiles",
+          "url": "https://help.salesforce.com/s/articleView?id=sf.perm_sets_overview.htm&type=5"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "Hard bounds are listed and enforced in the resolver; legally mandatory behaviours are not settings at all, or are locked at platform scope; dependencies are validated on the server with clear messages; the catalogue names the legal or security reason for each bound.",
+      "id": "safety",
+      "label": "Safe bounds",
+      "probes": [
+        "Are there hard platform bounds (ceilings, floors) that tenant values cannot cross?",
+        "Are legally mandatory behaviours (for example statutory notices, audit trail) non-configurable?",
+        "Is every cross-setting dependency validated server-side?"
+      ],
+      "question": "Can any combination of tenant choices put the platform, the tenant's data or a party's legal rights at risk?",
+      "redFlags": [
+        "Audit logging or statutory notices that a tenant can switch off",
+        "Validation only in the browser"
+      ],
+      "refs": [
+        {
+          "title": "OWASP Multi-Tenant Security Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "Each key states its effect timing (immediate, next sign-in, new cases only, next billing period); running workflows read pinned values where fairness requires it; cache invalidation is event-driven with a stated maximum lag; the console shows the timing before the admin confirms.",
+      "id": "timing",
+      "label": "When changes take effect",
+      "probes": [
+        "Does a change affect running cases and workflows, or only new ones?",
+        "Are caches invalidated within a stated time?",
+        "Is the user told when a change will apply?"
+      ],
+      "question": "Is it clear when a change applies and to which in-flight work?",
+      "redFlags": [
+        "Procedural settings changing mid-case without a record",
+        "Unbounded cache staleness"
+      ],
+      "refs": []
+    },
+    {
+      "goodAnswer": "Changes are written to the audit trail ([[PKG-audit-trail]]) and to versioned configuration history; a point-in-time resolver reproduces effective values for any case and date; rollback restores a previous version and is audited like any change.",
+      "id": "audit",
+      "label": "Audit and rollback",
+      "probes": [
+        "Is every change versioned with actor, reason, old and new value and scope?",
+        "Can the effective configuration for a case on a past date be reproduced?",
+        "Is rollback one action, and is it itself audited?"
+      ],
+      "question": "Can we reconstruct, for any date, which value applied and who changed it, and undo a bad change quickly?",
+      "redFlags": [
+        "Settings stored as mutable rows with no history",
+        "No way to show a party which procedural settings applied to their case"
+      ],
+      "refs": []
+    },
+    {
+      "goodAnswer": "A typed registry in `@platform/settings` is the single source; CI compares it with the catalogue; every key has an owner, default, scopes and audit class before it can merge.",
+      "id": "sync",
+      "label": "Catalogue matches code",
+      "probes": [
+        "Is there a typed registry in code that this catalogue is generated from or checked against?",
+        "Do new keys need an owner node and a default before merge?"
+      ],
+      "question": "Will this catalogue stay true as the code changes?",
+      "redFlags": [
+        "Hand-maintained list with no CI check",
+        "Keys created ad hoc in feature code"
+      ],
+      "refs": []
+    }
+  ],
+  "child": "requirement",
+  "depth": "2–6 pages. The catalogue table is the heart: every setting has a stable key, type, default, allowed scopes, lock behaviour, permission to change, when the change takes effect and audit class. Group settings into sub-tables of 5–20 rows. Behaviour belongs in the owning package or feature node; link to it rather than re-specifying it here.",
+  "id": "config",
+  "name": "Settings catalogue",
+  "order": 28,
+  "purpose": "Registers every configurable setting in one domain, at every level it can be set (platform, region, offering, tenant, unit, case type, case, user), so admins, engineers and auditors share one source of truth for defaults, inheritance, locks, permissions and audit.",
+  "sections": [
+    {
+      "example": "Covers how people prove who they are and how long they stay signed in. Consumed by [[PKG-authentication]] and the sign-in pages. Not here: provider client secrets (stored in the secrets manager), release flags.",
+      "guide": "Which domain this catalogue covers, which features consume these settings (link their nodes), and what is deliberately not a setting here (deployment configuration, feature flags used for release, secrets).",
+      "id": "purpose",
+      "label": "Purpose and scope",
+      "level": 1,
+      "refs": []
+    },
+    {
+      "example": "| Scope | Used | Administered by |\n|---|---|---|\n| Platform | yes | Platform owner |\n| Tenant | yes | Tenant security admin |\n| Case | no | Sign-in happens before a case is chosen |",
+      "guide": "Which levels of the hierarchy in [[PKG-configuration-scope-hierarchy]] this domain uses, who administers each level, and any level that is skipped and why.",
+      "id": "scopes",
+      "label": "Scopes that apply",
+      "level": 1,
+      "refs": []
+    },
+    {
+      "example": "| Key | Type | Default | Scopes | Lockable | Plan | Permission | Takes effect | Audit |\n|---|---|---|---|---|---|---|---|---|\n| `auth.session.idle_timeout_min` | int 5–480 | 30 | platform, tenant | yes | all | `settings.security:write` | next request | sensitive |",
+      "guide": "One row per setting. Columns: key (dot-separated, stable, lower_snake segments), type and allowed values, platform default, allowed scopes, lock (can a higher scope force the value for all lower scopes?), plan entitlement if any, permission needed to change it, when it takes effect (immediately, next sign-in, new cases only), audit class (standard, sensitive, maker-checker).",
+      "id": "catalogue",
+      "label": "Settings catalogue",
+      "level": 1,
+      "refs": [
+        {
+          "title": "Salesforce Help: Permission sets and profiles",
+          "url": "https://help.salesforce.com/s/articleView?id=sf.perm_sets_overview.htm&type=5"
+        }
+      ]
+    },
+    {
+      "example": "- `auth.password.enabled = false` requires at least one of SSO or passkeys to be enabled for every active admin.\n- Bounds: idle timeout can never exceed the platform ceiling for the tenant's data classification.",
+      "guide": "Rules between settings (one setting requires or forbids another), bounds the platform enforces regardless of tenant choice, and what the admin sees when a change is invalid.",
+      "id": "validation",
+      "label": "Validation and dependencies",
+      "level": 1,
+      "refs": []
+    },
+    {
+      "example": "| Key | Arbitral institution | SEBI ODR institution | CORD tenant |\n|---|---|---|---|\n| `auth.mfa.required_roles` | admins | all staff | admins |",
+      "guide": "Starting values for each tenant blueprint (for example arbitral institution, SEBI ODR institution, CORD tenant, court or government programme), and why they differ.",
+      "id": "defaults",
+      "label": "Defaults by tenant type",
+      "level": 2,
+      "refs": []
+    },
+    {
+      "example": "Tenant admin console → Security → Sign-in. Shows the inherited value with its source (\"Platform default\") and a lock icon when a higher scope enforces it. API: `PATCH /admin/v1/settings/auth.*`.",
+      "guide": "Console, page and section for each group of settings; API endpoint; whether the admin copilot may propose changes; how inherited and locked values are shown.",
+      "id": "admin_ux",
+      "label": "Where it is administered",
+      "level": 2,
+      "refs": []
+    },
+    {
+      "example": "Turning off MFA for any role needs approval from a second security admin and notifies all tenant owners. Rollback restores the previous published version in one action.",
+      "guide": "Which changes need maker-checker approval, who is notified, how a change is rolled back, and what the audit record holds (old value, new value, scope, actor, reason).",
+      "id": "change_control",
+      "label": "Change control and audit",
+      "level": 2,
+      "refs": [
+        {
+          "title": "OWASP Multi-Tenant Security Cheat Sheet",
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html"
+        }
+      ]
+    },
+    {
+      "example": "Keys are never reused. Renames keep an alias for two releases. A changed platform default applies only to tenants still inheriting it; tenants with an explicit value are listed in the release notes.",
+      "guide": "How keys are added, renamed or retired without breaking tenants; how defaults change for existing tenants; how settings travel in configuration packages ([[PKG-configuration-packages]]).",
+      "id": "migration",
+      "label": "Versioning and migration",
+      "level": 2,
+      "refs": []
+    },
+    {
+      "example": "The registry in `packages/settings/registry/auth.ts` is the source; CI fails if this catalogue and the registry disagree.",
+      "guide": "How resolution (inheritance, locks, entitlements) is tested for these keys, and how the catalogue is kept in sync with code (for example a generated registry checked in CI).",
+      "id": "testing",
+      "label": "Testing",
+      "level": 2,
+      "refs": []
+    },
+    {
+      "example": "- [ ] Should unit-level admins be allowed to shorten session timeouts? (Security)",
+      "guide": "Unresolved items as a checklist, each with an owner in brackets.",
+      "id": "questions",
+      "label": "Open questions",
+      "level": 3,
+      "refs": []
+    },
+    {
+      "example": "",
+      "guide": "Anything else worth keeping.",
+      "id": "notes",
+      "label": "Notes",
+      "level": 3,
+      "refs": []
+    }
+  ],
+  "sources": [
+    {
+      "title": "Configuration scope hierarchy (internal)",
+      "url": "[[PKG-configuration-scope-hierarchy]]"
+    },
+    {
+      "title": "Salesforce Help: Permission sets and profiles",
+      "url": "https://help.salesforce.com/s/articleView?id=sf.perm_sets_overview.htm&type=5"
+    },
+    {
+      "title": "OWASP Multi-Tenant Security Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html"
+    }
+  ],
+  "useFor": "Settings catalogues per domain: security and identity, cases and workflows, notifications, integrations, branding, content and locale, AI, data retention and privacy, billing and plans, personal preferences, platform operations"
+}

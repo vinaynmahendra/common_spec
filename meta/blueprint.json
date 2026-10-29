@@ -1,0 +1,6 @@
+{
+  "importedAt": "2026-10-28T02:44:44Z",
+  "note": "**Note on scope:** All domain-related and business-requirement enumerations in this outline are **indicative, not exhaustive**. They illustrate the kind of items each section covers and will be refined from actual requirements. Examples include Domain Modules, business events in Observability, Reporting and Analytics, and the examples given for workflows, integrations and billing. Sections marked _(indicative)_ fall under this note.",
+  "source": "Platform Scaffolding Outline",
+  "title": "Platform Spec Workspace"
+}

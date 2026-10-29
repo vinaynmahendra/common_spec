@@ -1,0 +1,419 @@
+# Template: Frontend architecture (`frontend`)
+
+Generated from `frontend.json`. Edit the JSON, then run `python3 tools/specs.py index`.
+
+**Purpose:** Specifies how one Next.js app or persona route group is built in the browser and on the rendering server: routes and layouts, rendering and caching, data fetching, state, forms, error handling, performance budgets, security headers, localisation, tenant theming, observability and testing. It sits between the app-wide standards and the screen-level UI journeys.
+
+**Depth:** 4–10 pages per route group. The routing tree, rendering and caching table, data operations table, error mapping and performance budgets must be exact (real route paths, cache keys, numbers). Inherit defaults from the app-level node and record only differences. Split a child node when a sub-area needs debate (for example the hearing room, document viewer, or offline support) and link UI nodes for screen-level detail rather than repeating it.
+
+**Default child template:** `requirement`
+
+## Sections
+
+Level 1 = Core (needed for review), 2 = Full (needed to approve), 3 = Optional.
+
+### `scope` Scope, audiences and surfaces (level 1)
+
+Name the app or route group this node covers, the personas it serves, the hosts and URL prefixes it answers on, and its entry points. State what is deliberately out of scope (for example screens owned by another route group, or the public API).
+
+Illustrative example (not a requirement):
+
+> **Route group:** `(counsel)` in `apps/web` — party and counsel portal.
+> 
+> | Item | Value |
+> |---|---|
+> | Personas | Claimant / respondent party, counsel, co-counsel (invited) |
+> | Hosts | `{tenant}.resolveoncord.com/portal`, tenant custom domains (e.g. `cases.<institution-domain>/portal`) |
+> | Entry points | Invitation email link, sign-in, deep link to a case from a notification |
+> | Typical devices | Desktop at law firms; mobile for parties checking status and joining hearings |
+> | Out of scope | Secretariat console `(secretariat)`, neutral workspace `(neutral)`, public REST API |
+> | Related journeys (ui nodes) | File a response, upload exhibits, pay case fee, join hearing |
+
+### `routing` Routes, layouts and boundaries (level 1)
+
+Show the route tree with layouts, route groups, dynamic segments and any parallel or intercepting routes, and mark where `loading`, `error` and `not-found` boundaries sit. Say what `proxy.ts` (formerly middleware) does for this group and what each layout is allowed to fetch.
+
+Illustrative example (not a requirement):
+
+> ```text
+> app/
+>   (counsel)/
+>     layout.tsx            # shell: tenant header, nav, locale; no case data
+>     cases/
+>       page.tsx            # my cases list (streamed)
+>       loading.tsx
+>       [caseId]/
+>         layout.tsx        # case header: number, stage, parties (authorised read)
+>         error.tsx         # case-level boundary, keeps shell usable
+>         not-found.tsx     # also used for 'no access' to avoid revealing existence
+>         documents/page.tsx
+>         filings/new/page.tsx
+>         hearings/page.tsx
+>         @modal/(.)documents/[docId]/page.tsx  # document preview as modal
+> ```
+> - `proxy.ts`: resolve tenant from host, set nonce + CSP, redirect unauthenticated users to `/sign-in?next=`; it does **not** make authorisation decisions.
+> - Layouts do not re-run on every navigation, so each page and Server Action checks access itself.
+
+### `rendering` Rendering and caching strategy (level 1)
+
+For each route, state how it renders (static shell, cached, streamed at request time, or client-rendered) and, for anything cached, the cache scope, key, lifetime, tags and what invalidates it. Include the HTTP Cache-Control the response must carry and whether a CDN may store it.
+
+Illustrative example (not a requirement):
+
+> | Route | Rendering | Cached data | Key includes | Lifetime / invalidation | HTTP |
+> |---|---|---|---|---|---|
+> | `/sign-in` | Static shell + tenant branding streamed | Tenant theme tokens | `tenantId`, `themeVersion` | `cacheLife('hours')`, tag `tenant:{id}:theme` on publish | `private` (varies by host) |
+> | `/cases` | Shell static; list streamed in `<Suspense>` | None (per user) | — | — | `private, no-store` |
+> | `/cases/[caseId]` header | Request-time | Case header via `React.cache` (per request only) | — | request | `private, no-store` |
+> | Procedural rules page | Cached | Rule text | `tenantId`, `rulesVersion`, `locale` | tag `tenant:{id}:rules` | `private` |
+> 
+> Rule: every `'use cache'` function takes `tenantId` as an explicit argument; no tenant data is prerendered at build time.
+
+### `data` Data fetching and mutations (level 1)
+
+Explain where data is read (Server Components through the data access layer, tRPC from client components, TanStack Query for interactive client views) and how writes happen (Server Actions or tRPC mutations), including validation, idempotency and how caches are refreshed after a write. List the main queries and mutations for this group.
+
+Illustrative example (not a requirement):
+
+> | Operation | Called from | Mechanism | Auth check | After success |
+> |---|---|---|---|---|
+> | List my cases | `cases/page.tsx` (server) | `dal.cases.listForUser()` | DAL: membership + tenant RLS | — |
+> | Document table (sort, filter, 5,000 rows) | client component | tRPC `documents.list` + TanStack Query, server-side paging | tRPC middleware + DAL | — |
+> | Submit response filing | `filings/new` form | Server Action `submitFiling` with `Idempotency-Key` from form token | Re-check case role + stage in action | `updateTag('case:{id}:filings')`, redirect to receipt |
+> | Upload exhibit | client | presigned PUT to tenant-region bucket, then Server Action `registerUpload` | action re-validates object key prefix | invalidate TanStack `['documents', caseId]` |
+> 
+> TanStack Query `staleTime` for case data: 30 s; refetch on window focus off for forms.
+
+### `state` Client state and URL state (level 2)
+
+Say which state lives where: server, URL (search params), TanStack Query cache, form state, local component state, and anything shared across tabs. Explain what is cleared on sign-out or tenant switch and what must survive a reload.
+
+Illustrative example (not a requirement):
+
+> | State | Home | Survives reload | Cleared on sign-out / tenant switch |
+> |---|---|---|---|
+> | Case list filters, sort, page | URL `?stage=&sort=&page=` | Yes | Yes (new URL) |
+> | Server data | TanStack Query cache keyed `[tenantId, ...]` | No | `queryClient.clear()` |
+> | Filing draft | Server (autosave every 10 s) + IndexedDB fallback encrypted per session | Yes | IndexedDB entry deleted |
+> | Hearing room UI (mute, layout) | Component state | No | — |
+> | Session status | `BroadcastChannel('session')` so sign-out in one tab signs out all tabs | — | — |
+> 
+> No global client store (Redux/Zustand) unless a node justifies it.
+
+### `forms` Forms, validation and uploads (level 2)
+
+Describe the form approach (React Hook Form with Zod schemas shared between client and server), server re-validation, how field errors map back to inputs, draft saving, file upload limits and progress, and whether forms work before JavaScript loads.
+
+Illustrative example (not a requirement):
+
+> - Schema `FilingSchema` lives in `packages/domain/filings` and is used by React Hook Form (`zodResolver`) and re-run inside `submitFiling`; server errors return `{ fieldErrors }` shaped like Zod's `flatten()`.
+> - Tenant custom fields (from Metadata management) are merged into the schema at request time, never hard-coded.
+> - Uploads: max 500 MB per file, resumable multipart, virus scan state shown per file; submit disabled until scans pass.
+> - Submit button uses `useFormStatus` pending state; double-submit blocked by idempotency key.
+> - The sign-in and invitation-accept forms work without JavaScript (progressive enhancement); complex filing forms require JavaScript and say so.
+
+### `errors` Error, loading and empty handling (level 1)
+
+Map error types (expected domain errors, not-found or no-access, session expired, server failure, network failure) to the boundary or UI that handles each, and state the loading pattern (skeletons, streaming, progress for long jobs). Link the ui nodes for screen-level copy.
+
+Illustrative example (not a requirement):
+
+> | Condition | Detected where | Handled by | User sees |
+> |---|---|---|---|
+> | Validation / rule failure (e.g. deadline passed) | Server Action returns typed error | Form | Inline message, input kept |
+> | Case missing or no access | DAL returns null → `notFound()` | `[caseId]/not-found.tsx` | "We can't find this case" (same for both) |
+> | Session expired | tRPC `UNAUTHORIZED` / action redirect | Global handler | Re-auth modal; draft kept |
+> | Unexpected server error | throw | `[caseId]/error.tsx` | Retry button + support reference (trace ID) |
+> | Root layout failure | throw | `global-error.tsx` | Minimal branded page |
+> | Bundle generation (minutes) | Temporal workflow | Progress panel + notification | "We'll email you when the bundle is ready" |
+
+### `performance` Performance budgets (level 1)
+
+Give numeric budgets for this group: Core Web Vitals at the 75th percentile, server response time per region, JavaScript per route, and the device and network profile they are measured on. Say which tool enforces each budget and where it fails the build.
+
+Illustrative example (not a requirement):
+
+> | Budget | Target | Measured on | Enforced by |
+> |---|---|---|---|
+> | LCP p75 | ≤ 2.5 s | Real users, per tenant and region | RUM dashboard + alert |
+> | INP p75 | ≤ 200 ms | Real users | RUM |
+> | CLS p75 | ≤ 0.1 | Real users | RUM |
+> | TTFB p75 (static shell) | ≤ 400 ms in-region | Synthetic from Mumbai, Singapore, Virginia | Synthetic monitor |
+> | First-load JS, `/cases/[caseId]` | ≤ 180 KB gzip | Build output | CI size check fails PR at +10 % |
+> | Lab profile | Mid-range Android, 4G (1.6 Mbps, 150 ms RTT) | Lighthouse CI on preview env | CI |
+> 
+> Heavy client libraries (PDF viewer, video SDK) load only on the routes that need them via dynamic import.
+
+### `security` Security headers and browser session (level 1)
+
+Specify the response headers for this group (CSP, HSTS, framing, referrer, permissions), whether CSP uses nonces or hashes and why, cookie attributes, how Server Actions are protected against cross-site calls, and which third-party scripts are allowed. Point to the Authentication and Security nodes for the underlying mechanisms.
+
+Illustrative example (not a requirement):
+
+> | Header / setting | Value for `(counsel)` |
+> |---|---|
+> | `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'nonce-{n}' 'strict-dynamic'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; connect-src 'self' https://uploads.{region}.<storage-host>; report-to csp` |
+> | CSP mode | Nonce (pages are per-user and dynamic anyway); marketing pages use hash/SRI instead |
+> | `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` |
+> | `Referrer-Policy` | `strict-origin-when-cross-origin` |
+> | `Permissions-Policy` | `camera=(self), microphone=(self)` on hearing routes only |
+> | Session cookie | `__Host-session`, `HttpOnly; Secure; SameSite=Lax; Path=/` |
+> | Server Actions | Origin check on; `serverActions.allowedOrigins` = tenant custom domains from registry |
+> | Uploaded document preview | Served from a separate sandbox origin with `Content-Disposition` and `sandbox` CSP |
+
+### `i18n` Localisation hookup (level 2)
+
+State how the locale is chosen (tenant default, user preference, Accept-Language), how messages are loaded for this group without shipping every language to the browser, how `lang` and `dir` are set, and how dates, times and money are formatted, especially across time zones.
+
+Illustrative example (not a requirement):
+
+> - Resolution order: user profile → tenant default → `Accept-Language` best match among tenant-enabled locales (BCP 47 tags, e.g. `en-IN`, `hi-IN`, `zh-Hant-HK`, `ar`).
+> - Messages loaded per route group on the server; client components receive only the namespaces they use.
+> - `<html lang dir>` set in the root layout; layout uses CSS logical properties so `ar` renders right-to-left.
+> - Hearing times are stored in UTC and shown in the viewer's time zone **and** the seat's time zone: "10:00 SGT (07:30 IST)".
+> - Amounts formatted with `Intl.NumberFormat` using the case currency, not the viewer's locale currency.
+
+### `theming` Tenant theming hookup (level 2)
+
+Explain how tenant branding reaches this group: where theme tokens come from, how they are applied (CSS variables in the root layout), how flashes of default branding are avoided, and what is cached. Reference the Branding and theming and UI design system nodes for the tokens themselves.
+
+Illustrative example (not a requirement):
+
+> ```tsx
+> // app/(counsel)/layout.tsx (sketch)
+> const theme = await getTenantTheme(tenant.id, tenant.themeVersion) // 'use cache', tag tenant:{id}:theme
+> return <html lang={locale} dir={dir} style={toCssVars(theme.tokens)}> ...
+> ```
+> | Token | Arbitral institution tenant | SEBI ODR institution tenant |
+> |---|---|---|
+> | `--brand-primary` | Institution navy | Institution green |
+> | `--logo-url` | Institution logo (tenant bucket) | Institution logo |
+> | Terminology pack | "Award", "Tribunal" | "Outcome", "Conciliator" |
+> 
+> Tokens are validated for WCAG contrast when published (Branding node), so the frontend applies them without runtime checks. No tenant CSS files or custom JavaScript are accepted.
+
+### `observability` Frontend observability (level 2)
+
+Describe server instrumentation (OpenTelemetry via `instrumentation.ts`), browser error reporting and Web Vitals collection, the attributes every signal carries (tenant, region, route group, release), how traces link browser to server, and what is never collected.
+
+Illustrative example (not a requirement):
+
+> - Server: `instrumentation.ts` registers OpenTelemetry; spans for render, Server Actions and tRPC carry `tenant.id`, `cloud.region`, `app.route_group=counsel`, `service.version`.
+> - Browser: `useReportWebVitals` sends LCP/INP/CLS with route template (`/cases/[caseId]`, never the real ID) to the regional collector `otel.{region}.<platform-host>`.
+> - Errors: client errors with source maps uploaded privately per release; `traceparent` propagated on tRPC calls.
+> - Error pages show the trace ID as a support reference.
+> - Never collected: case content, document names, party names, form values, full URLs with query strings; no session replay.
+
+### `testing` Testing strategy (level 2)
+
+List the test layers for this group and what each proves: unit and component tests, contract tests for tRPC and Server Actions, Playwright end-to-end per persona, accessibility, visual regression per tenant theme, budgets and header checks in CI.
+
+Illustrative example (not a requirement):
+
+> | Layer | Tool | Proves | Runs |
+> |---|---|---|---|
+> | Unit / component | Vitest + Testing Library | Form logic, formatting, state | Every PR |
+> | Action / tRPC contract | Vitest against test DB with RLS | Auth checks, validation, idempotency | Every PR |
+> | End-to-end | Playwright, one stored session per persona (`storageState`) | File response, upload, pay, join hearing | Every PR on preview env |
+> | Cross-tenant | Playwright: counsel in tenant A opens tenant B case URL | 404, no data in HTML or RSC payload | Every PR |
+> | Accessibility | axe in Playwright + manual screen-reader pass per release | WCAG 2.2 AA | PR + release |
+> | Visual | Screenshots for 2 tenant themes, LTR + RTL | Theming, layout | Nightly |
+> | Headers / budgets | CI script asserts CSP, cookies, `Cache-Control`; size check | Security and performance budgets | Every PR |
+
+### `questions` Open questions (level 3)
+
+Unresolved decisions as a checklist, each with an owner and the node or Decision record that will settle it.
+
+Illustrative example (not a requirement):
+
+> - [ ] Do we enable Cache Components and Partial Prerendering for authenticated groups, given nonce-based CSP rules out PPR? (Owner: frontend lead; ADR to be raised)
+> - [ ] Shared cache handler on Redis per region for `'use cache: remote'`, or in-memory only? (Infra)
+> - [ ] Can tenants embed the filing widget in their own site (`frame-ancestors` exception)? (Security)
+> - [ ] Offline support for parties joining hearings on poor networks? (Product)
+
+## Checks
+
+### `tenancy` Tenant isolation in rendering and caching
+
+**Question:** Can any rendered page, RSC payload, cached result, prefetch, CDN object or client-side cache in this app ever serve one tenant's (or one user's) content to another, and what independent layers prevent it?
+
+- Where is the tenant resolved (host in `proxy.ts`), and is it checked against the signed-in user's tenant memberships on the server before any data is read, rather than trusted from a header or path?
+- Does every `'use cache'`, `'use cache: remote'` and `unstable_cache`-style function receive `tenantId` (and `locale`, `themeVersion` where relevant) as an explicit argument, and is there a lint rule or code review check that enforces it?
+- Is any tenant-specific content prerendered at build time or placed in a static shell that a CDN could serve for a different host? What does the CDN use as its cache key (host included?), and are authenticated responses always `private` or `no-store`?
+- When a user who belongs to two tenants (counsel at two institutions) switches tenant, are the TanStack Query cache, router cache, IndexedDB drafts and BroadcastChannel state cleared or re-keyed?
+- Are cache tags tenant-scoped (`tenant:{id}:rules`) so that invalidating one tenant cannot purge or refresh another's, and is cross-instance invalidation coordinated across ECS tasks in the region?
+- Is the per-request memoisation (`React.cache`) the only place user-specific data is reused, so nothing user-specific lands in a shared cache?
+- Is there an automated test that requests the same URL under two tenant hosts and two users and diffs the HTML and RSC payload?
+
+**Good answer:** A table of every cache layer in use (CDN, Next.js server cache, remote cache handler, router cache, TanStack Query, browser storage) with its key, scope and invalidation, showing tenant in every shared key and no user data in shared caches. Tenant is derived on the server from host plus verified membership. A Playwright test proves that a second tenant host and a second user never receive the first one's content.
+
+**Red flags:**
+
+- Tenant taken from a client-supplied header, cookie or path segment without server-side membership check.
+- Shared cached functions that read the tenant implicitly from context instead of taking it as an argument.
+- CDN caching keyed on path only for pages that vary by host.
+- No clearing of client caches on tenant switch or sign-out.
+
+### `data-exposure` Server boundary and data exposure
+
+**Question:** Does every Server Component, Server Action and route handler in this app check authorisation itself, and does the browser receive only the fields this user is allowed to see?
+
+- Is all data access routed through a server-only data access layer (`import 'server-only'`) that applies the permission matrix, so a page or action cannot query Prisma directly?
+- Server Actions are reachable as public HTTP endpoints: does each one re-check session, tenant, case role and case stage, validate input with Zod, and ignore any IDs it did not authorise?
+- Are authorisation checks placed in pages and actions rather than only in layouts, which do not re-run on every navigation?
+- What do Server Components pass to Client Components? Are props shaped as minimal view objects (DTOs) rather than full Prisma records, and are sensitive objects marked with React taint APIs?
+- Which environment variables are prefixed `NEXT_PUBLIC_` and therefore shipped in the bundle? Is there a CI check that no secret or internal URL is among them?
+- Do error messages, `not-found` and 'no access' responses look identical so that case existence is not revealed across parties or tenants?
+- Are closure variables captured by inline Server Actions free of secrets, and is the action encryption key the same across all containers in a region?
+
+**Good answer:** A list of every Server Action and route handler in the group with its permission rule and input schema, a data access layer that is the only importer of Prisma in this app, and view-model types for every Server-to-Client prop. CI fails on direct Prisma imports outside the DAL and on unexpected `NEXT_PUBLIC_` variables. Negative tests call each action directly with a wrong-role session and expect denial.
+
+**Red flags:**
+
+- Authorisation done only in `proxy.ts` or in a layout.
+- Full database records passed as props to Client Components.
+- Server Actions that trust a `caseId` or `tenantId` from the form without re-checking access.
+- Different responses for 'does not exist' and 'not allowed'.
+
+### `browser-security` Browser security posture
+
+**Question:** Is the browser-side attack surface of this app (script injection, framing, third-party code, uploaded content, open redirects) closed by policy rather than by careful coding alone?
+
+- Is the CSP strict (nonce or hash based with `'strict-dynamic'`, no `'unsafe-inline'` or `'unsafe-eval'` in production)? Nonce-based CSP requires dynamic rendering and rules out Partial Prerendering: has that trade-off been decided per route group?
+- How is a CSP change rolled out (Report-Only first, violation reports collected per region and reviewed), and who owns the allow-list?
+- Which third-party scripts load (video SDK, payment widget, e-signature, analytics)? Is each one justified, loaded only on the routes that need it, and covered by a vendor assessment?
+- Where do uploaded documents (PDFs, images, HTML exhibits) render? Are they served from a separate origin with a sandboxing CSP and `Content-Disposition`, so a malicious exhibit cannot run script on the app origin?
+- Is framing denied (`frame-ancestors 'none'`) except for named, tenant-approved embeds, and are redirects after sign-in limited to same-origin relative paths?
+- Is any HTML rendered from user or tenant content (rich-text pleadings, tenant notices)? Which sanitiser runs, on the server or client, and is Trusted Types considered?
+- Are security headers asserted by an automated test against a deployed preview, not just present in config?
+
+**Good answer:** A header table per route group with the exact CSP, its mode (nonce or hash) and the reason, a Report-Only rollout plan with a named owner for violation reports, an inventory of third-party scripts by route, and a separate sandbox origin for user-uploaded content. CI checks the deployed headers and fails on `'unsafe-inline'` in script-src.
+
+**Red flags:**
+
+- `'unsafe-inline'` or wildcard sources in `script-src` in production.
+- Uploaded documents or tenant HTML rendered on the main app origin.
+- Third-party tag manager loaded on authenticated case pages.
+- Open redirect via an unvalidated `next=` parameter.
+
+### `session` Sessions in the browser
+
+**Question:** How does this app keep sessions safe in the browser across tabs, shared devices, timeouts and sign-out, and how are high-impact actions protected from cross-site requests and session theft?
+
+- Are session tokens held only in `__Host-` cookies with `HttpOnly`, `Secure` and `SameSite`, and never in `localStorage`, `sessionStorage` or JavaScript-readable memory?
+- What are the idle and absolute timeouts for each persona (for example 30 min idle for secretariat, 8 h absolute), and does the UI warn before expiry without losing a half-written filing?
+- Does sign-out in one tab sign out all tabs, clear client caches and drafts, and prevent the back button or back/forward cache from showing confidential case pages (`Cache-Control: no-store` on authenticated pages)?
+- Which actions require step-up authentication (re-enter MFA) — for example submitting an award, changing bank details for fee refunds, inviting a new counsel — and how does the frontend trigger and resume after it?
+- How are state-changing requests protected from cross-site forgery: Server Action origin checks, `SameSite`, custom headers on tRPC, and which custom domains are allowed origins?
+- How does the app behave on a shared or public computer (for example a party using a court kiosk): is there a 'this is a shared device' option with shorter sessions?
+
+**Good answer:** A table of timeouts and step-up actions per persona agreed with the Authentication node, cookie attributes stated exactly, cross-tab sign-out via BroadcastChannel with cache clearing, and `no-store` on every authenticated response verified by test. CSRF protection is described for both Server Actions and tRPC, including the allowed-origins list for tenant custom domains.
+
+**Red flags:**
+
+- Access or refresh tokens stored in `localStorage`.
+- Confidential pages visible via the back button after sign-out.
+- No step-up for actions with legal or financial effect.
+- Session expiry that discards unsaved filing content.
+
+### `resilience` Failure, deploys and version skew
+
+**Question:** What happens to users of this app when a back-end dependency fails, the network drops, or a new release rolls out while they are mid-task, and do they keep their work?
+
+- Is `deploymentId` configured so that a browser holding an old bundle gets a hard reload instead of failed chunk loads or 'Failed to find Server Action' errors during an ECS rolling deploy? Is the Server Actions encryption key identical across tasks?
+- When a hard reload is forced, is in-progress work (filing draft, upload queue) persisted to the server or IndexedDB first, so the reload does not lose it?
+- If tRPC or the database is slow or down, which parts of the page still render (shell, navigation, cached rules) and which show an error boundary? Is there a stated timeout per data call?
+- Are retries on the client bounded and idempotent (mutations carry an idempotency key; queries retry with backoff, at most 3 times)?
+- How are long uploads (500 MB exhibits) and hearing joins resumed after a network drop?
+- Is there a feature-flag kill switch for each risky feature in this group, and what does the user see when it is off?
+- Does streaming work end to end through the load balancer and CDN (no response buffering), and what happens if a streamed segment fails after the shell is sent?
+
+**Good answer:** A failure table per dependency with the user-visible result, timeout and retry policy; `deploymentId` and a shared action encryption key in the deploy config; drafts saved before any forced reload; resumable uploads; and a tested rolling-deploy scenario in staging where a user mid-filing completes successfully.
+
+**Red flags:**
+
+- No version-skew handling with rolling deploys across several containers.
+- Unbounded client retries on mutations without idempotency keys.
+- A single page-level error boundary that blanks the whole case view on one failed widget.
+- Uploads that must restart from zero after a network blip.
+
+### `capacity` Rendering cost and capacity
+
+**Question:** At expected and peak load per region, can the Next.js containers serve this app within budget, and what server and cache capacity does its rendering strategy require?
+
+- Which routes render on every request (all nonce-CSP pages, all per-user pages), what is the server CPU time per render at p95, and how many requests per second does one ECS task sustain?
+- What is the expected peak (for example 9:00–10:00 IST filing deadline rush, hearing start times), and how many tasks per region does it imply with headroom for one task failure?
+- Is the Next.js server cache shared across tasks (custom cache handler on regional Redis) or per task? What hit rate is expected, and what happens to latency right after a deploy when caches start empty?
+- Do large pages (secretariat queue of 20,000 cases, case with 5,000 documents) page on the server so the RSC payload stays under a stated size (for example 200 KB)?
+- Are request waterfalls avoided (parallel fetches, `React.cache` for repeated reads, no client-side fetch chains after hydration)?
+- Is a load test with production-like data run against a preview or staging stack before Approved, with results recorded?
+
+**Good answer:** Measured render cost per key route, a peak-load estimate per region with the resulting task count and autoscaling rule, a stated cache topology (shared handler or not) with expected hit rate and cold-start impact, and an RSC payload budget for the largest screens. Load test results are linked.
+
+**Red flags:**
+
+- Capacity assumed from static-site experience while most routes render dynamically.
+- Per-task in-memory caches relied on for correctness across several tasks.
+- Unpaginated server payloads for large case or document lists.
+- No load test before launch.
+
+### `accessibility` App-level accessibility mechanics
+
+**Question:** Do the app-wide mechanisms in this route group (navigation, focus, streaming, theming, language) meet WCAG 2.2 AA by default, so that individual screens cannot easily break it?
+
+- On client-side navigation, is the new page announced and focus moved to the main heading, and is there a skip link in each layout?
+- When content streams in behind `<Suspense>` or updates after a Server Action, are changes announced through a polite live region without stealing focus?
+- Do loading skeletons and spinners have accessible names, respect `prefers-reduced-motion`, and avoid layout shift that moves the user's focus target?
+- Is `lang` set correctly per page and on mixed-language content (an English page quoting a Hindi exhibit title), and does `dir` flip for right-to-left locales?
+- Do session-timeout warnings give users enough time and a way to extend (WCAG 2.2.1 Timing Adjustable)?
+- Is every tenant theme guaranteed to meet contrast and focus-visible requirements before it reaches this app, and is focus indication part of the design-system tokens rather than tenant colours?
+
+**Good answer:** A described route-change announcer and focus policy implemented once in the shared layout, a live-region pattern for streamed and mutated content, reduced-motion handling, correct `lang`/`dir` handling, timeout warnings meeting 2.2.1, and automated axe checks plus a manual screen-reader pass on at least two persona journeys per release.
+
+**Red flags:**
+
+- No focus management on client-side navigation.
+- Streamed content updates that are silent to screen readers.
+- Session timeouts with no warning or extension.
+- Tenant themes applied without contrast validation.
+
+### `residency` Region, residency and telemetry privacy
+
+**Question:** Does all frontend traffic and telemetry for a tenant (pages, assets, fonts, Web Vitals, error reports, CSP reports, third-party calls) stay within the tenant's pinned region and avoid personal or case data?
+
+- Which hosts does the browser contact for this app (CDN, fonts, video SDK, analytics, error reporting)? Is each in the tenant's region or covered by a recorded transfer basis?
+- Are fonts and icons self-hosted, so viewers' IP addresses are not sent to third-party CDNs?
+- Do the CDN and any edge functions cache or log authenticated responses outside the region (for example a global CDN edge in another country)?
+- Are RUM, client error and CSP violation reports sent to a collector in the tenant's region, and stripped of URLs with IDs, query strings, form values and names?
+- Are source maps uploaded privately and not served publicly from production?
+- Is any session replay or heatmap tool used? If so, how is case content masked, and has it been assessed under DPDP, GDPR and PDPA?
+- Can one user action be followed from browser to server via `traceparent` without putting personal data in the trace?
+
+**Good answer:** An inventory of every browser-contacted host per region with purpose and data sent, self-hosted fonts, a regional telemetry collector with a redaction step, route templates instead of raw URLs in telemetry, private source maps, and no session replay on authenticated pages unless a recorded assessment allows it.
+
+**Red flags:**
+
+- Third-party font or script CDNs on authenticated pages.
+- Error reports containing full URLs, form values or document names.
+- Telemetry for India or Singapore tenants sent to a single US-hosted vendor without a transfer assessment.
+- Publicly served production source maps.
+
+### `supply-chain` Framework upgrades and supply chain
+
+**Question:** How does this app stay on supported, patched versions of Next.js, React and client libraries, and how is new client-side code vetted before it reaches users?
+
+- What is the patch window for security releases of Next.js and React (for example critical within 72 hours, as needed for the December 2025 React Server Components vulnerability)? Who watches the advisories?
+- Which experimental or canary features does this app rely on (for example SRI hashing, partial prefetching), and what is the fallback if they change?
+- Is there a dependency budget for the client bundle, with review required for any new runtime dependency added to `apps/web`?
+- Are lockfile, provenance and install-script controls (pnpm `onlyBuiltDependencies`, audit in CI) in place for this app?
+- How are major upgrades (for example Next.js 15 to 16, middleware renamed to proxy) planned: codemods, a preview environment per PR, Playwright suite as the gate?
+- Is a software bill of materials produced per release for the frontend image, as ISO 27001 and SOC 2 evidence?
+
+**Good answer:** A named owner and a stated patch SLA for framework security advisories, an inventory of experimental features with fallbacks, CI dependency checks with review for new client dependencies, and an upgrade playbook using codemods and the end-to-end suite. An SBOM is produced per release.
+
+**Red flags:**
+
+- No owner or SLA for framework security patches.
+- Production reliance on experimental flags without a fallback.
+- New client dependencies merged without review or bundle-size check.
+

@@ -1,0 +1,478 @@
+{
+  "checks": [
+    {
+      "goodAnswer": "A stated workflow ID pattern containing tenant and business key, with the reuse / conflict policy; tenantId registered as a search attribute; every activity signature taking tenantId and setting it on the transaction; region routing described; and a fairness rule for shared queues. Workflow history holds IDs rather than document content where possible, and any personal data in payloads is encrypted with a regional key.",
+      "id": "tenancy",
+      "label": "Tenancy and residency",
+      "probes": [
+        "What is the workflow ID convention, and does it include tenant ID and business key (for example `{tenantId}-case-intake-{caseId}`, matching the `{tenantId}-{process}-{entityId}` guardrail in 7.6) so that a duplicate start in the same tenant is rejected and two tenants can never collide? Which Workflow ID reuse and conflict policy is set?",
+        "Which Temporal namespace and cluster does it run on? Since Temporal is self-hosted per region, how is a start request routed to the tenant's home region, and what stops a worker in one region from processing another region's tenant?",
+        "Is tenantId a custom search attribute on every execution, so operators can list and act on one tenant's workflows only?",
+        "Does every activity receive tenantId as an explicit input and open its Prisma transaction with that tenant set (forced RLS), rather than reading it from an ambient context that may be missing in a worker?",
+        "Are there shared task queues across tenants? If yes, how is one noisy tenant (for example a bulk import of 10,000 SEBI ODR cases) prevented from starving others: per-tenant rate limits, priority, or separate queues?",
+        "What happens to running workflows when a tenant is suspended or offboarded: paused, cancelled with compensation, or allowed to finish?",
+        "What tenant and personal data is written into workflow history (inputs, results, signal payloads), and is it encrypted with a payload codec using keys held in the tenant's region?"
+      ],
+      "question": "Does every part of this workflow (ID, search attributes, activities, child workflows, task queues) carry the tenant, run only in the tenant's home region, and set the tenant on every database transaction it opens?",
+      "redFlags": [
+        "Workflow IDs without tenant ID, or random UUIDs that allow duplicate runs for the same business key.",
+        "Activities that query the database without setting the tenant (RLS bypassed by a privileged worker role).",
+        "Full documents or personal data stored in workflow history unencrypted.",
+        "No behaviour defined for running workflows when a tenant is suspended."
+      ],
+      "refs": [
+        {
+          "title": "Temporal docs: Workflow Id and Run Id",
+          "url": "https://docs.temporal.io/workflow-execution/workflowid-runid"
+        },
+        {
+          "title": "Temporal docs: Manage custom Search Attributes (self-hosted)",
+          "url": "https://docs.temporal.io/self-hosted-guide/visibility/custom-search-attributes"
+        },
+        {
+          "title": "Temporal docs: Payload encryption (TypeScript SDK)",
+          "url": "https://docs.temporal.io/develop/typescript/best-practices/data-handling/data-encryption"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A table of every external input (start, signal, update, query, cancel) with the permitted role and relationship and where the check runs, plus update validators for state-dependent input. Operator access to Temporal UI, CLI and codec server is restricted by role and region, and production reset or terminate actions need approval and are logged in the platform audit trail.",
+      "id": "security",
+      "label": "Access to workflow controls",
+      "probes": [
+        "For every signal and update listed in the Signals section, which role and case relationship may send it (for example only the presiding arbitrator may signal \"order issued\")? Where is that check made: in the API before calling Temporal, in an update validator, or both?",
+        "Do update validators reject invalid or out-of-state input (for example extending a deadline that has already passed) so a bad request never enters history?",
+        "Who has access to the Temporal Web UI and CLI in each region, and can they see payloads? Is the codec server restricted so operators see only what they are permitted to see?",
+        "Which operator actions (reset, terminate, batch cancel) are allowed in production, who approves them, and are they audited outside Temporal?",
+        "Do activities call external systems (e-sign, payment, email, MII APIs) with credentials scoped to the tenant, and where are those secrets fetched from?",
+        "Can a user trigger the workflow repeatedly to cause cost or spam (for example resending notices)? What rate limits apply?"
+      ],
+      "question": "Who and what may start, signal, update, query, cancel, reset or terminate this workflow, and is each of those checked against the permission matrix before it reaches Temporal?",
+      "redFlags": [
+        "Signals sent directly from the browser or from any authenticated user without a permission check.",
+        "Open Temporal Web UI access with decoded payloads for all staff.",
+        "Production terminate or reset with no approval or audit.",
+        "Platform-wide credentials used by activities for tenant-specific integrations."
+      ],
+      "refs": [
+        {
+          "title": "Temporal docs: Workflow message passing (TypeScript SDK)",
+          "url": "https://docs.temporal.io/develop/typescript/message-passing"
+        },
+        {
+          "title": "Temporal docs: Payload encryption (TypeScript SDK)",
+          "url": "https://docs.temporal.io/develop/typescript/best-practices/data-handling/data-encryption"
+        },
+        {
+          "title": "OWASP Application Security Verification Standard (ASVS)",
+          "url": "https://owasp.org/www-project-application-security-verification-standard"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A table of activities with side effect, idempotency key, timeouts, retry policy (initial interval, backoff, maximum attempts or expiry) and non-retryable error types. Every external side effect is either idempotent at the provider or protected by a recorded-outcome check, and long-running activities heartbeat.",
+      "id": "idempotency",
+      "label": "Side effects and idempotency",
+      "probes": [
+        "For each activity with an external side effect (email or SMS to a party, payment capture, e-sign envelope, MII report submission, document generation), what idempotency key is used and is it passed to the external system?",
+        "Where the external system has no idempotency support, how is a duplicate prevented: a check-then-act with a recorded outcome, or a dedup table keyed by workflow ID plus activity ID?",
+        "Are start-to-close timeouts, schedule-to-close timeouts and heartbeat timeouts set for each activity, with values justified by the external system's behaviour? Long activities (transcription, eBundling) must heartbeat.",
+        "Which errors are marked non-retryable (validation failures, permission denied, sanctions hit), so they fail fast instead of retrying for hours?",
+        "Is workflow code free of non-deterministic calls (current time, random numbers, network, database) outside activities, and is this enforced by the SDK sandbox and lint rules?",
+        "Do any short jobs belong on BullMQ instead of Temporal (or the reverse)? Is the boundary stated, and how is a hand-off between them made idempotent?"
+      ],
+      "question": "Can every activity be retried safely, so that retries, worker crashes and replays never send a notice twice, charge twice or file a document twice?",
+      "redFlags": [
+        "Default retry policy everywhere, with no non-retryable errors listed.",
+        "Emails, payments or regulator submissions with no idempotency key.",
+        "No timeouts stated, or a long activity with no heartbeat.",
+        "Database or HTTP calls made directly from workflow code."
+      ],
+      "refs": [
+        {
+          "title": "Temporal docs: Detecting Activity failures",
+          "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+        },
+        {
+          "title": "Temporal docs: Detecting Workflow failures",
+          "url": "https://docs.temporal.io/encyclopedia/detecting-workflow-failures"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A list of legally significant steps mapped to audit event types, with the writing activity, fields captured and evidence retained (for example provider message ID and delivery status for every notice). Human inputs carry actor and reason. The answer states Temporal's retention period and confirms the platform audit trail, not Temporal history, is the legal record.",
+      "id": "audit",
+      "label": "Audit and legal record",
+      "probes": [
+        "List the steps that create legal effect or evidence, for example notice served, deadline started, deadline expired, reminder sent, default noted, hearing scheduled, transcript certified, award dispatched.",
+        "For each, which activity writes the audit record, with actor (person or system), tenant, case, timestamp, inputs and outcome? Is the write idempotent so a retry does not duplicate it?",
+        "Which evidence must be kept for proof of service: message ID from the email or SMS provider, delivery and read receipts, bounce records, the exact content sent?",
+        "When a person acts through a signal or update (for example secretariat extends a deadline), are their identity and reason captured in the payload and in the audit record?",
+        "How long does the Temporal namespace keep closed workflow history, and is anything needed later kept elsewhere before it expires?",
+        "When automated steps act on behalf of the institution (auto-reminders, auto-default), is that clearly recorded as a system action with the rule version that triggered it?"
+      ],
+      "question": "Which steps of this workflow are legally significant events, and how is each one recorded in the platform audit trail (not just in Temporal history, which is retained only briefly)?",
+      "redFlags": [
+        "Relying on Temporal history as the audit trail.",
+        "No proof-of-service evidence for notices with legal effect.",
+        "Signals that change deadlines without recording who and why.",
+        "Audit writes that duplicate on retry."
+      ],
+      "refs": [
+        {
+          "title": "ISO/IEC 27001:2022 Information security management systems",
+          "url": "https://www.iso.org/standard/27001"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "Every regulatory or contractual timer has a cited source, a value held in a versioned Decision node, a time-zone and holiday rule, and a stated policy for in-flight rule changes. Breach handling includes pre-breach warning, escalation, the action on breach and a record feeding the Reporting node.",
+      "id": "compliance",
+      "label": "Regulatory timelines",
+      "probes": [
+        "For each timer in the Timers section, what is its source (for example SEBI ODR circular stage timelines, HKIAC rules, the DPDP Rules 72-hour breach report, an SLA in the tenant contract) and which Decision node holds the value?",
+        "How are business days, public holidays and the seat's time zone applied, and where does the holiday calendar come from per jurisdiction?",
+        "When a rule value changes (for example a regulator shortens a timeline), do running workflows keep the value they started with or pick up the new one? Is that choice stated per timer and recorded?",
+        "Is there an early warning before breach (for example at 75% of elapsed time) to the responsible person, and an escalation path if nobody acts?",
+        "What happens at breach: an automatic step, a human task, a report to the MII or institution? Is the breach recorded for regulatory reporting?",
+        "Can a timer be paused or extended (stay of proceedings, extension granted by the tribunal)? Who can do it, and is the reason captured?",
+        "Is there a report or dashboard showing every open regulatory deadline by tenant, and who watches it?"
+      ],
+      "question": "Which timers in this workflow come from regulation, institutional rules or contract, how are their values configured and versioned, and how is a breach detected and reported before it happens?",
+      "redFlags": [
+        "Timer durations hard-coded in workflow code.",
+        "No holiday or time-zone rule for deadlines with legal effect.",
+        "Breach only discovered after the fact, with no warning or escalation.",
+        "No way to pause or extend a deadline with a recorded reason."
+      ],
+      "refs": [
+        {
+          "title": "SEBI circular: Online Resolution of Disputes in the Indian Securities Market (amendment, Dec 2023)",
+          "url": "https://www.sebi.gov.in/legal/circulars/dec-2023/amendment-to-circular-dated-july-31-2023-on-online-resolution-of-disputes-in-the-indian-securities-market_80110.html"
+        },
+        {
+          "title": "Digital Personal Data Protection Rules, 2025 as notified (PIB)",
+          "url": "https://static.pib.gov.in/WriteReadData/specificdocs/documents/2025/nov/doc20251117695301.pdf"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A stated versioning approach (patching or Worker Versioning) with the rule for when each is used, replay tests in CI using histories captured from each region, continue-as-new or child workflows for long-running cases, and a written repair procedure for in-flight bugs with approval. Rule versions are pinned or refreshed by explicit policy.",
+      "id": "change",
+      "label": "Change and versioning safety",
+      "probes": [
+        "What is the expected lifetime of one instance (a case workflow may run for over a year)? Is the workflow split (child workflows, continue-as-new) so that history stays under Temporal's limits and new code can take over at clear points?",
+        "Which change mechanism is used: Temporal patching (patched / deprecatePatch), Worker Versioning, or starting new instances on a new workflow type? When does each apply?",
+        "Is replay testing run in CI against a sample of real (anonymised) histories from production for every change to workflow code?",
+        "How are rule and configuration changes (Decision node values) separated from code changes, and which version does a running instance use?",
+        "How are old patches removed, and who tracks when no instances remain on an old version?",
+        "If a bug is found mid-flight, what is the repair procedure: signal a correction, reset to a prior event, or cancel and restart with migration? Who approves?"
+      ],
+      "question": "How will this workflow be changed safely while instances are running for weeks or months, and how do we prove a change does not break them?",
+      "redFlags": [
+        "No versioning approach for workflows that run longer than a release cycle.",
+        "No replay tests, or replay tests only against synthetic histories.",
+        "Unbounded history growth on long cases (no continue-as-new).",
+        "Fixing stuck workflows by ad hoc terminate and restart."
+      ],
+      "refs": [
+        {
+          "title": "Temporal docs: Versioning (TypeScript SDK)",
+          "url": "https://docs.temporal.io/develop/typescript/versioning"
+        },
+        {
+          "title": "Temporal docs: Testing suite (TypeScript SDK)",
+          "url": "https://docs.temporal.io/develop/typescript/testing-suite"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A list of search attributes, metrics and alerts with thresholds, each alert routed to a named on-call team with a runbook. Stuck is defined in measurable terms for this workflow, schedule-to-start latency is monitored per task queue and region, and traces link the start request to activities with tenantId and no personal data.",
+      "id": "observability",
+      "label": "Observability and operations",
+      "probes": [
+        "Which custom search attributes are registered (tenantId, caseId, stage, nextDeadline, assignee) so operators can filter instances in the Temporal UI and through the visibility API?",
+        "Which metrics are emitted: SDK and server metrics (schedule-to-start latency, activity failures, workflow task failures) plus business metrics (instances per stage, time in stage)?",
+        "What counts as stuck for this workflow (for example no progress for 48 hours in a stage where the expected time is 4 hours, or an activity retrying for more than 1 hour), and which alert fires?",
+        "Who is paged or notified for each alert, in which region, and during which hours? Is there a runbook link in the alert?",
+        "Are traces propagated from the API request that started the workflow through activities to external calls (OpenTelemetry), with tenantId on spans and personal data excluded?",
+        "Is there a per-tenant view the institution's secretariat can see (for example pending human tasks and upcoming deadlines) separate from the operator view?"
+      ],
+      "question": "Can operators see, for every tenant and region, which instances are stuck, failing or about to breach a deadline, and are they alerted in time to act?",
+      "redFlags": [
+        "No search attributes beyond defaults, so one tenant's instances cannot be found.",
+        "Alerts only on infrastructure, none on business-level stuck states.",
+        "No owner or runbook for alerts.",
+        "Personal data in logs, metrics labels or span attributes."
+      ],
+      "refs": [
+        {
+          "title": "Temporal docs: Search Attributes",
+          "url": "https://docs.temporal.io/search-attribute"
+        },
+        {
+          "title": "Temporal docs: Monitor Temporal Platform metrics (self-hosted)",
+          "url": "https://docs.temporal.io/self-hosted-guide/monitoring"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "A table of human waits with assignee rule, notification channel, reminder and escalation timings (from a Decision node), timeout outcome, and reassignment rule. Task completion is an update with validation so that only one response is accepted and the result is returned to the user immediately.",
+      "id": "humantasks",
+      "label": "Human tasks",
+      "probes": [
+        "For each human wait, which role and case relationship receives the task, and how is the assignee resolved (named person, pool, round-robin)?",
+        "How is the person notified (in-app task list, email, SMS) and are notifications accessible and in their preferred language?",
+        "What is the reminder and escalation schedule, and what happens at final timeout: default action, escalation to a supervisor, or a recorded failure to act with legal effect?",
+        "What happens if the assignee is removed (neutral recused, counsel withdraws, staff member leaves)? Is the task reassigned automatically, and is the reassignment audited?",
+        "Can two people act on the same task at once? How is the second response rejected, and what does the person see?",
+        "How does a person see why they are being asked and what each choice will do (especially for choices with legal effect)?"
+      ],
+      "question": "For every step that waits on a person, is it clear who is asked, how they are told, how long they have, and what happens if they do not act or are no longer available?",
+      "redFlags": [
+        "Waits with no timeout, leaving instances stuck indefinitely.",
+        "No reassignment when the assignee leaves the case.",
+        "Human input via fire-and-forget signals with no validation or confirmation.",
+        "Timeout outcomes with legal effect that nobody from legal or operations has approved."
+      ],
+      "refs": [
+        {
+          "title": "Temporal docs: Workflow message passing (TypeScript SDK)",
+          "url": "https://docs.temporal.io/develop/typescript/message-passing"
+        }
+      ]
+    },
+    {
+      "goodAnswer": "Time-skipping tests for each timer, branch and cancellation point; failure-injection tests for each activity with compensation verified; activity tests against real Postgres with RLS and provider sandboxes; replay tests gating merges; and a per-region staging end-to-end run. Coverage is shown against the step list in this node.",
+      "id": "testing",
+      "label": "Testing",
+      "probes": [
+        "Are there time-skipping tests for every timer and SLA, including reminder, escalation and breach paths?",
+        "Is every branch in the step diagram covered, including cancellation at each waiting point?",
+        "Are activity failures injected (timeouts, non-retryable errors, external system down for hours) to prove retries, compensation and alerts behave as specified?",
+        "Are activities tested on their own against real dependencies (Postgres with RLS, sandbox accounts for e-sign, payments and messaging) including idempotency on repeat calls?",
+        "Is replay testing in CI against recorded histories mandatory before merge for workflow code changes?",
+        "Is there an end-to-end test in staging that runs one realistic case through the workflow in each region?",
+        "Are tenant-isolation tests included, for example a signal for tenant A's workflow sent with tenant B's credentials is rejected?"
+      ],
+      "question": "How will we prove every path through this workflow, including timers, human waits, failures and compensation, behaves as specified without waiting real time?",
+      "redFlags": [
+        "Only happy-path tests, or timers tested by real sleeps.",
+        "No replay tests in CI.",
+        "Compensation paths never exercised.",
+        "Activities mocked everywhere, so idempotency and RLS behaviour are never tested."
+      ],
+      "refs": [
+        {
+          "title": "Temporal docs: Testing suite (TypeScript SDK)",
+          "url": "https://docs.temporal.io/develop/typescript/testing-suite"
+        },
+        {
+          "title": "Temporal docs: Versioning (TypeScript SDK)",
+          "url": "https://docs.temporal.io/develop/typescript/versioning"
+        }
+      ]
+    }
+  ],
+  "child": "requirement",
+  "depth": "3–8 pages. Every step, timer and human input must appear in the sequence; implementers should not invent behaviour. Failure handling is mandatory for Approved. Tenant-specific timings are referenced to a Decision node, not hard-coded here.",
+  "id": "workflow",
+  "name": "Workflow / process",
+  "order": 5,
+  "purpose": "Specifies a long-running or multi-step process: what starts it, every step and wait, who acts, and what happens when things fail or rules change mid-flight.",
+  "sections": [
+    {
+      "example": "Ensures every scheduled hearing has a confirmed neutral, or escalates to the tribunal secretary in time to re-arrange. Done = hearing confirmed or escalation task created.",
+      "guide": "What the process achieves and what \"done\" means.",
+      "id": "purpose",
+      "label": "Purpose and outcome",
+      "level": 1,
+      "refs": [
+        {
+          "title": "Separation of Concerns (Temporal) design note in this workspace",
+          "url": "#n-WF-separation-of-concerns-temporal"
+        }
+      ]
+    },
+    {
+      "example": "Started on `hearing.scheduled`. Inputs: hearingId, hearingAt, facts {tenant, caseType, claimValue}, policyVersion. Workflow ID: `{tenantId}-hearing-reminder-{hearingId}` (re-scheduling the hearing signals the same workflow, never starts a second).",
+      "guide": "What starts it (event, user action, schedule), inputs, and the workflow ID convention.",
+      "id": "trigger",
+      "label": "Trigger and inputs",
+      "level": 1,
+      "refs": [
+        {
+          "title": "Temporal docs: Workflow Id and Run Id",
+          "url": "https://docs.temporal.io/workflow-execution/workflowid-runid"
+        }
+      ]
+    },
+    {
+      "example": "| Actor | Interaction |\n|---|---|\n| Neutral | Confirms via portal → `neutralConfirmed` signal |\n| Tribunal secretary | Receives escalation task |\n| Scheduler | Sends `hearingRescheduled` signal |",
+      "guide": "Humans and systems that act in the process, and how each interacts (signal, update, task).",
+      "id": "actors",
+      "label": "Actors",
+      "level": 1,
+      "refs": [
+        {
+          "title": "Temporal docs: Workflow message passing (TypeScript)",
+          "url": "https://docs.temporal.io/develop/typescript/message-passing"
+        }
+      ]
+    },
+    {
+      "example": "1. **Decision** `hearing-reminder-policy` → reminderDays, confirmWithinHours\n2. **Timer** until hearingAt − reminderDays\n3. **Activity** sendReminder (Notifications)\n4. **Wait** for `neutralConfirmed` or timeout confirmWithinHours\n5. **Activity** escalateToSecretary (creates human task) if timed out",
+      "guide": "Ordered steps with type (decision, activity, timer, signal wait, child workflow). Diagram for anything with branches.",
+      "id": "steps",
+      "label": "Step sequence",
+      "level": 1,
+      "refs": [
+        {
+          "title": "Separation of Concerns (Temporal) design note in this workspace",
+          "url": "#n-WF-separation-of-concerns-temporal"
+        }
+      ]
+    },
+    {
+      "example": "| Timer | Value | Source | On breach |\n|---|---|---|---|\n| Reminder lead | 3–7 days | Decision table per tenant | — |\n| Confirmation window | 24–48 h | Decision table | Escalate |\n| SEBI ODR arbitrator appointment | 5 calendar days from reference (illustrative; confirm against the current circular) | SEBI ODR circular | Alert compliance |",
+      "guide": "Every deadline, its source (rule, regulation, contract) and what happens at breach.",
+      "id": "timers",
+      "label": "Timers and SLAs",
+      "level": 1,
+      "refs": [
+        {
+          "title": "SEBI circular: Online Resolution of Disputes (31 July 2023)",
+          "url": "https://www.sebi.gov.in/legal/circulars/jul-2023/online-resolution-of-disputes-in-the-indian-securities-market_74794.html"
+        }
+      ]
+    },
+    {
+      "example": "| Name | Kind | Payload | Validation |\n|---|---|---|---|\n| neutralConfirmed | Signal | {userId} | Must be the appointed neutral |\n| hearingRescheduled | Signal | {hearingAt} | Restarts reminder timer |\n| status | Query | — | Returns current step and due time |",
+      "guide": "Every external input and state query, with payload and validation.",
+      "id": "signals",
+      "label": "Signals, updates and queries",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Temporal docs: Workflow message passing (TypeScript)",
+          "url": "https://docs.temporal.io/develop/typescript/message-passing"
+        }
+      ]
+    },
+    {
+      "example": "| Activity | Idempotency key | Timeout | Retries |\n|---|---|---|---|\n| sendReminder | `{wfId}:reminder` | 1 min | 5, exp. backoff |\n| escalateToSecretary | `{wfId}:escalate` | 1 min | 5 |",
+      "guide": "Each activity, its side effect, idempotency key, timeout and retry policy.",
+      "id": "activities",
+      "label": "Activities",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Temporal docs: Detecting Activity failures",
+          "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+        },
+        {
+          "title": "IETF draft: Idempotency-Key HTTP header",
+          "url": "https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header-06"
+        }
+      ]
+    },
+    {
+      "example": "- Notification provider down after retries → create ops alert, continue to wait step (escalation still protects the hearing)\n- Hearing cancelled → workflow cancelled; no compensation needed\n- Neutral withdraws after confirming → handled by Neutrals replacement workflow (child), not here",
+      "guide": "What happens on activity failure after retries, on cancellation, and which steps need undoing.",
+      "id": "failure",
+      "label": "Failure, cancellation and compensation",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Temporal docs: Detecting Activity failures",
+          "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+        },
+        {
+          "title": "Temporal docs: Detecting Workflow failures",
+          "url": "https://docs.temporal.io/encyclopedia/detecting-workflow-failures"
+        }
+      ]
+    },
+    {
+      "example": "Policy version pinned at start (input). Code changes use Worker Versioning; in-flight reminders finish on the version they started.",
+      "guide": "How running instances behave when the code or rules change.",
+      "id": "versioning",
+      "label": "Versioning",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Temporal docs: Versioning (TypeScript)",
+          "url": "https://docs.temporal.io/develop/typescript/versioning"
+        },
+        {
+          "title": "Temporal docs: Testing suite (TypeScript)",
+          "url": "https://docs.temporal.io/develop/typescript/testing-suite"
+        }
+      ]
+    },
+    {
+      "example": "Search attributes: tenantId, caseId, hearingId, step. Alert if any instance sits in \"escalate\" step > 2 h without a task being created.",
+      "guide": "Search attributes, metrics, alerts for stuck or failing instances.",
+      "id": "observability",
+      "label": "Visibility and monitoring",
+      "level": 2,
+      "refs": [
+        {
+          "title": "Temporal docs: Search Attributes",
+          "url": "https://docs.temporal.io/search-attribute"
+        }
+      ]
+    },
+    {
+      "example": "- [ ] Should co-arbitrators each confirm, or the presiding arbitrator only?",
+      "guide": "Checklist.",
+      "id": "questions",
+      "label": "Open questions",
+      "level": 3,
+      "refs": []
+    }
+  ],
+  "sources": [
+    {
+      "title": "Separation of Concerns (Temporal) design note in this workspace",
+      "url": "#n-WF-separation-of-concerns-temporal"
+    },
+    {
+      "title": "Temporal docs: Workflow Id and Run Id",
+      "url": "https://docs.temporal.io/workflow-execution/workflowid-runid"
+    },
+    {
+      "title": "Temporal docs: Workflow message passing (TypeScript)",
+      "url": "https://docs.temporal.io/develop/typescript/message-passing"
+    },
+    {
+      "title": "SEBI circular: Online Resolution of Disputes (31 July 2023)",
+      "url": "https://www.sebi.gov.in/legal/circulars/jul-2023/online-resolution-of-disputes-in-the-indian-securities-market_74794.html"
+    },
+    {
+      "title": "Temporal docs: Detecting Activity failures",
+      "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+    },
+    {
+      "title": "IETF draft: Idempotency-Key HTTP header",
+      "url": "https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header-06"
+    },
+    {
+      "title": "Temporal docs: Detecting Workflow failures",
+      "url": "https://docs.temporal.io/encyclopedia/detecting-workflow-failures"
+    },
+    {
+      "title": "Temporal docs: Versioning (TypeScript)",
+      "url": "https://docs.temporal.io/develop/typescript/versioning"
+    },
+    {
+      "title": "Temporal docs: Testing suite (TypeScript)",
+      "url": "https://docs.temporal.io/develop/typescript/testing-suite"
+    },
+    {
+      "title": "Temporal docs: Search Attributes",
+      "url": "https://docs.temporal.io/search-attribute"
+    }
+  ],
+  "useFor": "Case lifecycle flows, hearing scheduling and reminders, service of notices, eBundling, transcription and AI pipelines, data principal rights requests, dunning, tenant provisioning"
+}

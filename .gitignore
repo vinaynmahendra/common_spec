@@ -1,0 +1,6 @@
+build/
+__pycache__/
+*.pyc
+workspace-export.json
+.DS_Store
+.axon/

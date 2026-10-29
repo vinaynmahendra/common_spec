@@ -4,3 +4,4 @@ __pycache__/
 workspace-export.json
 .DS_Store
 .axon/
+*.bundle

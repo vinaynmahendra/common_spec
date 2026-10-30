@@ -5,3 +5,4 @@ workspace-export.json
 .DS_Store
 .axon/
 *.bundle
+.claude/settings.local.json
